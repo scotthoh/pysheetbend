@@ -51,7 +51,7 @@ print('map: {0}'.format(ipmap))
 rad = -1.0
 radscl = 4.0 # def 4.0
 res = 6
-ncyc = 12
+ncyc = 2
 ncycrr = 1 # refine-regularise-cycle
 fltr = 2 # quadratic
 inclconst = False
@@ -60,6 +60,7 @@ resbycyc = [6.0, 3.0]
 refuiso = False
 postrefuiso = True
 pseudoreg = True
+hetatom = False
 # defaults
 refxyz = True # in future for xyx, uiso, aniso
 if res <= 0.0:
@@ -129,7 +130,7 @@ struc_id = os.path.basename(ippdb).split('.')[0]
 # for psedoregularizer use BioPy structure
 original_structure_BioPy = PDBParser.read_PDB_file_BioPy(struc_id, 
                                                          ippdb,
-                                                         hetatm=False,
+                                                         hetatm=hetatom,
                                                          water=False)
 # TEMPy structure class
 #structure_instance = PDBParser._bio_strcuture_to_TEMpy(ippdb,
@@ -139,7 +140,7 @@ original_structure_BioPy = PDBParser.read_PDB_file_BioPy(struc_id,
                                                        
 structure_instance = PDBParser.read_PDB_file(struc_id,
                                              ippdb,
-                                             hetatm=False,
+                                             hetatm=hetatom,
                                              water=False)
 original_structure = structure_instance.copy()
 # read map
@@ -208,7 +209,7 @@ for cycrr in range(0, ncycrr):
         # here calculate electron density with b-factors from input structure
         start = timer()
         #cmap = emc.main(map_curreso, structure_instance) #ippdb)
-        cmap = emc.main_opt(map_curreso, structure_instance) #ippdb)
+        cmap = emc.calc_map_density(map_curreso, structure_instance) #ippdb)
         fltr_cmap = Filter(cmap)
         ftfilter = array_utils.tanh_lowpass(fltr_cmap.fullMap.shape, mapin.apix/rcyc, fall=0.5)
         lowpass_cmap = fltr_cmap.fourier_filter(ftfilter=ftfilter, inplace=False)
@@ -266,7 +267,6 @@ for cycrr in range(0, ncycrr):
         newMap = newMap.downsample_map(map_curreso.apix,
                                        grid_shape=map_curreso.fullMap.shape)
         newMap.update_header()
-        gridtree = SB.maptree(newMap)
 
         # maskmap at current reso
         # newMap = SB.make_atom_overlay_map1(newMap, struct_inst)
@@ -445,7 +445,7 @@ for cycrr in range(0, ncycrr):
         results.append(temp_result)
 
         outname = 'testout_sheetbend1_withorthmat_{0}.pdb'.format(cyc+1)
-        structure_instance.write_to_PDB(outname, hetatom=True)
+        structure_instance.write_to_PDB(outname, hetatom=hetatom)
         if len(shift_vars) != 0:
             outcsv = 'shiftvars1_withorthmat_{0}.csv'.format(cyc+1)
             fopen = open(outcsv, 'w')
@@ -472,7 +472,7 @@ for cycrr in range(0, ncycrr):
     #end of psedo reg loop
 
 # write pdb
-structure_instance.write_to_PDB('testout_sheetbend1_withorthmat_final.pdb', hetatom=False)
+structure_instance.write_to_PDB('testout_sheetbend1_withorthmat_final.pdb', hetatom=hetatom)
 
 # write xml results
 f = open("results.xml", "w")

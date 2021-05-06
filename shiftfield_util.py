@@ -1,19 +1,15 @@
 # Utily functions for shiftfield code
 # S.W.Hoh, University of York, 2020
-#%%
-from scipy import signal
+
 import math
 import numpy as np
-from mpl_toolkits import mplot3d
 from timeit import default_timer as timer
 '''from TEMPy.math.vector import Vector
 from TEMPy.maps.map_parser import MapParser as mp
 from TEMPy.protein.structure_blurrer import StructureBlurrer
 '''
 
-from TEMPy.MapParser import MapParser as mp
 from TEMPy.Vector import Vector as Vector
-from TEMPy.StructureBlurrer import StructureBlurrer
 from TEMPy.EMMap import Map
 
 try:
@@ -21,76 +17,12 @@ try:
     pyfftw_flag = True
 except ImportError:
     pyfftw_flag = False
+
 import sys
 if sys.version_info[0] > 2:
     from builtins import isinstance
 
 
-def filter_winsize_1Dto3D(w):
-    """
-    Convert a 1D filtering kernel to 3D
-    Arguments:
-    *window function*
-      a window function; e.g signal.windows.hann(window_size); window_size is an Int
-    Returns:
-      filtering kernel in 3D array
-    """
-    w_size = w.shape[0]
-    #print('wsize', w_size)
-    w1 = np.outer(np.ravel(w), np.ravel(w))
-    #print('w1', w1)
-    win1 = np.tile(w1, np.hstack([w_size, 1, 1]))
-    #print('win1', win1)
-    w2 = np.outer(np.ravel(w), np.ones([1, w_size]))
-    #print('w2', w2)
-    win2 = np.tile(w2, np.hstack([w_size, 1, 1]))
-    #print('win2', win2)
-    win2 = np.transpose(win2, np.hstack([1, 2, 0]))
-    #print('win2_2', win2)
-    win3 = np.multiply(win1, win2)
-    #print('win3', win3)
-    return win3
-
-
-#radius = 10
-#window_size = math.floor((radius*2) / apix)
-#if not window_size % 2: # make window size an odd int
-#    window_size = window_size + 1
-#
-#win = winsize_1Dto3D(signal.windows.hann(window_size))
-#print(win)
-
-#%%
-
-def apply_filter_hann(fullmap, radius, apix):
-    """
-    Apply hann filter to map data and return filtered data.
-    Similar to the radial filter in CLIPPER
-    Arguments:
-    *fullmap*
-      map data
-    *radius*
-      radius cutoff
-    *apix*
-      pixel size in angstrom/pixel
-      can be single float or array of float pixel size in [x,y,z] direction
-    """
-    #rad = 7  # angstrom (4x the current refinement reso, cycles progressive increas 6 to 3)
-    #24 - 12 angstrom at the end
-    #6A data 24 radis , step 3A, 12A radius
-    window_size = math.floor((radius*2) / apix)
-    if not window_size % 2: # make window size an odd int
-        window_size = window_size + 1
-
-    win = filter_winsize_1Dto3D(signal.windows.hann(window_size))
-    sum_n = np.sum(win)
-
-    filtmap = signal.convolve(fullmap, win, mode='same', method='fft') / sum_n
-
-    return filtmap
-
-
-#%%
 def mapGridPositions_radius(densMap, atom, gridtree, radius):
     """
     Returns the indices of the nearest pixels within the radius
@@ -114,219 +46,96 @@ def mapGridPositions_radius(densMap, atom, gridtree, radius):
     if((densMap.x_size() >= x_pos >= 0) and (densMap.y_size() >= y_pos >= 0)
        and (densMap.z_size() >= z_pos >= 0)):
         # search all points within radius of atom
-        list_points = gridtree.query_ball_point([
-          atom.x, atom.y, atom.z], radius)
+        list_points = gridtree.query_ball_point([atom.x,
+                                                 atom.y,
+                                                 atom.z],
+                                                radius)
         return list_points  # ,(x_pos, y_pos, z_pos)
     else:
         print('Warning, atom out of map box')
         return []
 
-def make_atom_overlay_map1_rad(densMap, prot, gridtree, rad):
-    """
-    Returns a Map instance with atom locations recorded on
-    the voxel within radius with a value of 1
-    """
-    densMap = densMap.copy()
-    densMap.fullMap = densMap.fullMap * 0.0
-    # use mapgridpositions to get the points within radius. faster and efficient
-    # this works. resample map before assigning density
-    for atm in prot:
-        # get list of nearest points of an atom
-        points = mapGridPositions_radius(densMap, atm, gridtree[0], rad)
-        for ind in points:
-            pos = gridtree[1][ind]  # real coordinates of the index
-            # initialise AtomShapeFn object with atom
-            # get 3D coordinates from map grid position
-            # coord_pos = mapgridpos_to_coord(pos, newMap, False)
-            # calculate electron density from 3D coordinates and
-            # set to the map grid position
-            # p_z=int(pos[2]-(newMap.apix/2.0))
-            # p_y=int(pos[1]-(newMap.apix/2.0))
-            # p_x=int(pos[0]-(newMap.apix/2.0))
-            p_z = pos[2]
-            p_y = pos[1]
-            p_x = pos[0]
-
-            densMap.fullMap[p_z, p_y, p_x] = 1.0
-    return densMap
-
-
-def mapgridpos_to_coord(pos, densMap, ccpem_tempy=False):
-    """
-    Returns the 3D coordinates of the map grid position given
-    Argument:
-    *pos*
-      map grid position
-    *densMap*
-      Map instance the atom is placed on
-    """
-
-    origin = densMap.origin
-    apix = densMap.apix
-    #midapix = apix/2.0
-    
-    #if not ccpem_tempy:
-    x_coord = (pos[0] * apix) + origin[0]
-    y_coord = (pos[1] * apix) + origin[1]
-    z_coord = (pos[2] * apix) + origin[2]
-#else:
-    #    x_coord = (pos[0] - midapix) * apix + origin[0]
-    #    y_coord = (pos[1] - midapix) * apix + origin[1]
-    #    z_coord = (pos[2] - midapix) * apix + origin[2]
-
-    return (x_coord, y_coord, z_coord)
-
 
 class grid_dim:
+    """
+    Grid dimensions object
+    """
     def __init__(self, densMap):
+        """
+        Sets up grid size in real, reciprocal and half space
+        Arguments
+        *densMap*
+          Input map
+        """
         self.grid_sam = densMap.fullMap.shape
-        self.g_reci = (densMap.z_size(), densMap.y_size(), densMap.x_size()//2+1)
-        self.g_real = (self.g_reci[0], self.g_reci[1], int(self.g_reci[2]-1)*2)  #int((g_reci_[2]-1)*2))
-        self.g_half = (densMap.z_size()//2, densMap.y_size()//2, densMap.x_size()//2+1)
+        self.g_reci = (densMap.z_size(), densMap.y_size(),
+                       densMap.x_size()//2+1)
+        self.g_real = (self.g_reci[0], self.g_reci[1],
+                       int(self.g_reci[2]-1)*2)
+        self.g_half = (densMap.z_size()//2, densMap.y_size()//2,
+                       densMap.x_size()//2+1)
 
 
-def plan_fft(gridshape):
-    output_shape = gridshape.g_reci
-    #.shape[:len(data_r.shape)-1] + \
-    #                            (data_r.shape[-1]//2 + 1,)
-
+def plan_fft(grid_dim):
+    """
+    Returns fft object. Plan fft
+    Arguments
+    *grid_dim*
+      grid shape of map
+    """
+    output_shape = grid_dim.g_reci
+    # need to add scipy fft if pyfftw not imported
     try:
         if not pyfftw_flag:
             raise ImportError
-        #start = timer()
-        input_arr = pyfftw.empty_aligned(gridshape.grid_sam,
-                                            dtype='float64', n=16)
-        #end = timer()
-        #print(end-start)
-        #start = timer()
+
+        input_arr = pyfftw.empty_aligned(grid_dim.grid_sam,
+                                         dtype='float64', n=16)
         output_arr = pyfftw.empty_aligned(output_shape,
-                                            dtype='complex128', n=16)
-        #end = timer()
-        #print(end-start)
-        # fft planning,
-        fft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_FORWARD', axes=(0,1,2), flags=['FFTW_ESTIMATE'])
-    except:
+                                          dtype='complex128', n=16)
+        # fft planning
+        fft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_FORWARD',
+                          axes=(0, 1, 2), flags=['FFTW_ESTIMATE'])
+    except ImportError:
         print('Not running')
-    
+
     return fft
 
 
-def plan_ifft(gridshape):
-    output_shape = gridshape.g_real
-    #data_c.shape[:len(data_c.shape)-1] + \
-    #                            ((data_c.shape[-1] - 1)*2,)
-
+def plan_ifft(grid_dim):
+    """
+    Returns ifft object. Plan ifft
+    Arguments
+    *grid_dim*
+      grid shape of map
+    """
+    output_shape = grid_dim.g_real
+    # need to add scipy fft if pyfftw not imported
     try:
         if not pyfftw_flag:
             raise ImportError
-        #start = timer()
-        input_arr = pyfftw.empty_aligned(gridshape.g_reci,
+        input_arr = pyfftw.empty_aligned(grid_dim.g_reci,
                                          dtype='complex128', n=16)
-        #end = timer()
-        #print(end-start)
-        #start = timer()
         output_arr = pyfftw.empty_aligned(output_shape,
                                           dtype='float64', n=16)
-        #end = timer()
-        #print(end-start)
-        # fft planning,
+        # ifft planning,
         ifft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_BACKWARD', axes=(0,1,2), flags=['FFTW_ESTIMATE'])
-    except:
+    except ImportError:
         print('Not running')
-    
+
     return ifft
 
 
-def fourier_transform(data_r, scale, conj=False):
-    
-    #grid_size = data_r.size
-    output_shape = data_r.shape[:len(data_r.shape)-1] + \
-                                (data_r.shape[-1]//2 + 1,)
-    
-    try:
-        if not pyfftw_flag:
-            raise ImportError
-        #start = timer()
-        input_arr = pyfftw.empty_aligned(data_r.shape,
-                                         dtype='float64', n=16)
-        #end = timer()
-        #print(end-start)
-        #start = timer()
-        output_arr = pyfftw.empty_aligned(output_shape,
-                                          dtype='complex128', n=16)
-        #end = timer()
-        #print(end-start)
-        # fft planning,
-        fft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_FORWARD', axes=(0,1,2), flags=['FFTW_ESTIMATE'])
-        input_arr[:, :, :] = data_r[:, :, :]
-        fft.update_arrays(input_arr, output_arr)
-        #start = timer()
-        fft()
-        #end = timer()
-        #print(end-start)
-    except:
-        print("not running")
-    # scale?
-    #s = float(scale) / grid_size
-    #print('fft scale, ', s)
-    if conj:
-        output_arr[:,:,:] = (output_arr[:,:,:]).conjugate()
-    '''if conj:
-        for oz in range(0, output_shape[0]):
-            for oy in range(0, output_shape[1]):
-                for ox in range(0, output_shape[2]):
-                    output_arr[oz, oy, ox] = (output_arr[oz, oy, ox]).conjugate()
-    '''
-    #n = int(np.prod(output_shape))
-    #for j in range(0, n):
-    #    output_arr[j] = (s * output_arr[j]).conjugate()
-
-    return output_arr
-
-
-def inv_fourier_transform(data_c, scale, grid_reci, conj=False):
-    # grid_size = data_c.map_size()
-    #s = float(scale)
-    #n = int(np.prod(grid_reci))
-    if conj:
-        data_c[:,:,:] = (data_c[:,:,:]).conjugate()
-        '''
-        for z in range(0, grid_reci[0]):
-            for y in range(0, grid_reci[1]):
-                for x in range(0, grid_reci[2]):
-                    data_c[z, y, x] = (data_c[z, y, x]).conjugate()
-        '''
-    output_shape = data_c.shape[:len(data_c.shape)-1] + \
-                                ((data_c.shape[-1] - 1)*2,)
-
-    try:
-        if not pyfftw_flag:
-            raise ImportError
-        #start = timer()
-        input_arr = pyfftw.empty_aligned(data_c.shape,
-                                         dtype='complex128', n=16)
-        #end = timer()
-        #print(end-start)
-        #start = timer()
-        output_arr = pyfftw.empty_aligned(output_shape,
-                                          dtype='float64', n=16)
-        #end = timer()
-        #print(end-start)
-        # fft planning,
-        ifft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_BACKWARD', axes=(0,1,2), flags=['FFTW_ESTIMATE'])
-        input_arr[:, :, :] = data_c[:, :, :]
-        ifft.update_arrays(input_arr, output_arr)
-        #start = timer()
-        ifft()
-        #end = timer()
-        #print(end-start)
-    except:
-        print('not running')
-
-    return output_arr
-
-
 def cor_mod(a, b):
+    """
+    Returns corrected remainder of division. If remainder <0,
+    then adds value b to remainder.
+    Arguments
+    *a*
+      Dividend
+    *b*
+      Divisor
+    """
     c = np.fmod(a, b)
     if (c < 0):
         c += b
@@ -334,6 +143,17 @@ def cor_mod(a, b):
 
 
 def hkl_c(c, ch, g):
+    """
+    Returns the index 
+    Arguments
+    *c*
+      Index h,k,l
+    *ch*
+      Half of the grid shape
+    *g*
+      Real space grid shape
+    """
+
     # z, y, x; return vector(x, y ,z)
     cv = Vector(int(c[2]), int(c[1]), int(c[0]))
     chv = Vector(int(ch[2]), int(ch[1]), int(ch[0]))
@@ -353,17 +173,16 @@ def eightpi2():
     """
     return (8.0 * np.pi * np.pi)
 
+
 def u2b(u_iso):
     """
     Returns the isotropic B-value
-    Argument:
+    Converts Isotropic U-value to B value
+    Argument
     *u_iso*
       isotropic U-value
     """
     return u_iso * eightpi2()
-
-def map_box_vol(densMap):
-    return densMap.x_size() * densMap.y_size() * densMap.z_size()
 
 
 class Cell:
@@ -391,11 +210,11 @@ class Cell:
             self.beta = np.deg2rad(beta)
         if self.gamma > np.pi:
             self.gamma = np.deg2rad(gamma)
-        
-        self.vol = a*b*c*math.sqrt(2.0*math.cos(alpha)*math.cos(beta)*math.cos(gamma)
-                                    -math.cos(alpha)*math.cos(alpha)
-                                    -math.cos(beta)*math.cos(beta)
-                                    -math.cos(gamma)*math.cos(gamma)+1.0)
+
+        self.vol = a*b*c*np.sqrt(2.0*np.cos(alpha)*np.cos(beta)*np.cos(gamma)
+                                 - np.cos(alpha)*np.cos(alpha)
+                                 - np.cos(beta)*np.cos(beta)
+                                 - np.cos(gamma)*np.cos(gamma)+1.0)
 
         # deal with null
         if self.vol <= 0.0:
@@ -412,28 +231,31 @@ class Cell:
         self.fracmat = np.linalg.inv(self.orthmat)
 
         # calculate metric_tensor
-        self.realmetric = self.metric_tensor(self.a, self.b, self.c, self.alpha, self.beta, self.gamma)
-        self.recimetric = self.metric_tensor(self.a_star(), self.b_star(), self.c_star(), 
-                                             self.alpha_star(), self.beta_star(), self.gamma_star())
+        self.realmetric = self.metric_tensor(self.a, self.b, self.c,
+                                             self.alpha, self.beta, self.gamma)
+        self.recimetric = self.metric_tensor(self.a_star(), self.b_star(),
+                                             self.c_star(), self.alpha_star(),
+                                             self.beta_star(),
+                                             self.gamma_star())
 
     def alpha_star(self):
-        return np.arccos( (np.cos(self.gamma)*np.cos(self.beta)-np.cos(self.alpha)) /
-                         (np.sin(self.beta)*np.sin(self.gamma)) )
-    
+        return np.arccos((np.cos(self.gamma)*np.cos(self.beta)-np.cos(self.alpha))
+                         / (np.sin(self.beta)*np.sin(self.gamma)))
+
     def beta_star(self):
-        return np.arccos( (np.cos(self.alpha)*np.cos(self.gamma)-np.cos(self.beta)) /
-                         (np.sin(self.gamma)*np.sin(self.alpha)) )
+        return np.arccos((np.cos(self.alpha)*np.cos(self.gamma)-np.cos(self.beta))
+                         / (np.sin(self.gamma)*np.sin(self.alpha)))
 
     def gamma_star(self):
-        return np.arccos( (np.cos(self.beta)*np.cos(self.alpha)-np.cos(self.gamma)) /
-                         (np.sin(self.alpha)*np.sin(self.beta)) )
+        return np.arccos((np.cos(self.beta)*np.cos(self.alpha)-np.cos(self.gamma))
+                         / (np.sin(self.alpha)*np.sin(self.beta)))
 
     def a_star(self):
         return self.b*self.c*np.sin(self.alpha)/self.vol
 
     def b_star(self):
         return self.c*self.a*np.sin(self.beta)/self.vol
-    
+
     def c_star(self):
         return self.a*self.b*np.sin(self.gamma)/self.vol
 
@@ -442,10 +264,10 @@ class Cell:
 
     def a(self):
         return self.a
-    
+
     def b(self):
         return self.b
-    
+
     def c(self):
         return self.c
 
@@ -454,7 +276,7 @@ class Cell:
 
     def beta(self):
         return self.beta
-    
+
     def gamma(self):
         return self.gamma
 
@@ -468,58 +290,24 @@ class Cell:
         return (m00, m11, m22, m01, m02, m12)
 
     def metric_reci_lengthsq(self, x, y, z):
-        # v[0]*(v[0]*m00 + v[1]*m01 + v[2]*m02)
-        # + v[1]*(v[1]*m11 + v[2]*m12) + v[2]*(v[2]*m22)
-        return (x*(x*self.recimetric[0] + y*self.recimetric[3] + z*self.recimetric[4]) +
-                y*(y*self.recimetric[1] + z*self.recimetric[5]) + z*(z*self.recimetric[2]))
-'''
-def interp_cubic(densmap, u, v, w):
+        return (x*(x*self.recimetric[0] + y*self.recimetric[3]
+                   + z*self.recimetric[4])
+                + y*(y*self.recimetric[1] + z*self.recimetric[5])
+                + z*(z*self.recimetric[2]))
 
-    calculate value of map coordinate by third order (cubic) interpolation
-    based on the surrounding 64 points. Re-coded from CLIPPER C++
-    u0 = math.floor(u)
-    v0 = math.floor(v)
-    w0 = math.floor(w)
-
-    cu1 = float(u - u0)
-    cv1 = float(v - v0)
-    cw1 = float(w - w0)
-
-    cu0 = 1.0 - cu1
-    cv0 = 1.0 - cv1
-    cw0 = 1.0 - cw1
-
-    cu = [0.0] * 5
-    cu[0] = -0.5*cu1*cu0*cu0  # cubic spline coeffs: u
-    cu[1] = cu0*(-1.5*cu1*cu1 + cu1 + 1.0)
-    cu[2] = cu1*(-1.5*cu0*cu0 + cu0 + 1.0)
-    cu[3] = -0.5*cu18cu1*cu0
-    cv[0] = -0.5*cv1*cv0*cv0  # cubic spline coeffs: v
-    cv[1] = cv0*(-1.5*cv1*cv1 + cv1 + 1.0)
-    cv[2] = cv1*(-1.5*cv0*cv0 + cv0 + 1.0)
-    cv[3] = -0.5*cv1*cv1*cv0
-    cw[0] = -0.5*cw1*cw0*cw0  # cubic spline coeffs: w
-    cw[1] = cw0*(-1.5*cw1*cw1 + cw1 + 1.0)
-    cw[2] = cw1*(-1.5*cw0*cw0 + cw0 + 1.0)
-    cw[3] = -0.5*cw1*cw1*cw0
-
-    su = 0.0
-    for j in range(0,4):
-'''
-
-# %%
 
 def crop_mapgrid_points(x0, y0, z0, densmap, k=4):
-    #SB=StructureBlurrer()
-    #atm_point = SB.mapGridPosition(densmap, atom)
-    # make a small box containing density data
-    # of surrounding 64 map grid points of atom_point
+    """
+    Return cropped map containing density data
+    of surrounding 64 map grid points of atom_point
+    """
     boxmap = Map(np.zeros((4, 4, 4)),
-            [0, 0, 0],
-            densmap.apix,
-            'mapname',)
+                 [0, 0, 0],
+                 densmap.apix,
+                 'mapname',)
 
-    # problem: should the atom point be at the corner of the box or the centre for interpolation
+    # problem: should the atom point be at the corner of the box or
+    # the centre for interpolation
     # atm mapgridposition at corner
     for iz in range(0, 4):
         for iy in range(0, 4):
@@ -533,6 +321,16 @@ def crop_mapgrid_points(x0, y0, z0, densmap, k=4):
 
 
 def get_lowerbound_posinnewbox(x, y, z):
+    """
+    Return lowerbound of the index, and index in new box
+    Argument
+    *x*
+      Index in x direction
+    *y*
+      Index in y direction
+    *z*
+      Index in z direction
+    """
     x0 = x - 1
     y0 = y - 1
     z0 = z - 1
@@ -542,35 +340,24 @@ def get_lowerbound_posinnewbox(x, y, z):
 
     return [x0, y0, z0], [nbx, nby, nbz]
 
-#def xyz_indices(densmap):
-#    xg, yg, zg = np.mgrid[0:densmap.x_size(),
-#                          0:densmap.y_size(),
-#                          0:densmap.z_size()]
 
-def ind_hkl_to_coord(densmap):
+def maptree_zyx(densmap):
+    """
+    Return gridtree and indices (z,y,x) convention
+    Argument
+    *densmap*
+      Input density map
+    """
     origin = densmap.origin
     apix = densmap.apix
-    nz, ny, nx = densmap.fullMap.shape
-
-    zy, yg, xg = np.mgrid[0:nz, 0:ny, 0:nz]
-    zg = zg * apix + origin[2]
-    yg = yg * apix + origin[1]
-    xg = xg * apix + origin[0]
-
-    indi = vstack([xg.ravel(), yg.ravel(), zg.ravel()]).T
-
-def maptree_1(densmap):
-    #return gridtree and indices, z,y,x convention
-    origin = densmap.origin
-    apix = densmap.apix
-    nz, ny, nx = densmap.fullMap.shape
+    nz, ny, nx = densmap.box_size()
 
     zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
-    zg = zg * apix + origin[2]
-    yg = yg * apix + origin[1]
-    xg = xg * apix + origin[0]
+    zgc = zg * apix + origin[2]
+    ygc = yg * apix + origin[1]
+    xgc = xg * apix + origin[0]
 
-    indi = np.vstack([zg.ravel(), yg.ravel(), xg.ravel()]).T
+    indi = np.vstack([zgc.ravel(), ygc.ravel(), xgc.ravel()]).T
 
     try:
         from scipy.spatial import cKDTree
@@ -579,14 +366,18 @@ def maptree_1(densmap):
         try:
             from scipy.spatial import KDTree
             gridtree = KDTree(indi)
-        except  ImportError:
+        except ImportError:
             return
-    
-    zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
+
+    # zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
     indi = np.vstack([zg.ravel(), yg.ravel(), xg.ravel()]).T
     return gridtree, indi
 
+
 class radial_fltr:
+    """
+    Radial filter object
+    """
     def __init__(self, radcyc, function, densmap):
         self.radius = radcyc
         self.function = function
@@ -626,7 +417,7 @@ class radial_fltr:
         #g_half = (g_real[0]//2, g_real[1]//2, g_real[0]//2+1)
         #SB = StructureBlurrer()
         #gt = SB.maptree(densmap)
-        gt = maptree_1(densmap)
+        self.gt = maptree_zyx(densmap)
         # filpping indices made things wrong because the 
         # the chronology of indices has changed.
         # is this true? pt1 = 001 and pt1 = 100 different
@@ -639,7 +430,7 @@ class radial_fltr:
         
         start = timer()
         
-        c = gt[1] + gh # self.gridshape.g_half
+        c = self.gt[1] + gh # self.gridshape.g_half
         end = timer()
         print('indi + halfgrid ', end-start)
         
@@ -674,7 +465,7 @@ class radial_fltr:
             f000 += rf
             #print(gt[1][i][0], gt[1][i][1], gt[1][i][2], rf)
             count+=1
-            self.fltr_data_r[gt[1][i][0], gt[1][i][1], gt[1][i][2]] = rf #[i]
+            self.fltr_data_r[self.gt[1][i][0], self.gt[1][i][1], self.gt[1][i][2]] = rf #[i]
         end = timer()
         '''
         count = 0
