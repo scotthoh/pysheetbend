@@ -379,6 +379,17 @@ class radial_fltr:
     Radial filter object
     """
     def __init__(self, radcyc, function, densmap):
+        """
+        Initialise filter object, sets the radius and function to use
+        Arguments
+        *radcyc*
+          radius of the filter
+        *function*
+          0 = step, 1 = linear, 2 = quadratic
+        *densmap*
+          reference density map
+        """
+        self.verbose = 1
         self.radius = radcyc
         self.function = function
         '''if function == 'step':
@@ -398,7 +409,7 @@ class radial_fltr:
         for i in range(0, self.nrad):
             r = self.drad * (float(i) + 0.5)
             self.sum_r[i] = r*r*math.fabs(self.fltr(r))
-        
+
         for i in range(1, self.nrad):
             self.sum_r[i] += self.sum_r[i-1]
         for i in range(0, self.nrad):
@@ -413,7 +424,7 @@ class radial_fltr:
             apix = np.array([densmap.apix[2], densmap.apix[1], densmap.apix[0]])
         else:    
             apix = np.array([densmap.apix, densmap.apix, densmap.apix])
-        
+
         #g_half = (g_real[0]//2, g_real[1]//2, g_real[0]//2+1)
         #SB = StructureBlurrer()
         #gt = SB.maptree(densmap)
@@ -425,48 +436,56 @@ class radial_fltr:
         #indi = np.flip(gt[1], 1) # gt[1] indices is x,y,z , flip become z,y,x
         #end = timer()
         #print('flip indices ', end-start)
-        
-        gh = np.array([self.gridshape.g_half])
-        
-        start = timer()
-        
-        c = self.gt[1] + gh # self.gridshape.g_half
-        end = timer()
-        print('indi + halfgrid ', end-start)
-        
-        start = timer()
-        c1 = self.cor_mod1(c, self.gridshape.grid_sam) - gh
-        end = timer()
 
-        print('cor mod ', end-start)
-        
-        start = timer()
+        gh = np.array([self.gridshape.g_half])
+        if self.verbose >= 1:
+            start = timer()
+        c = self.gt[1] + gh  # self.gridshape.g_half
+        if self.verbose >= 1:
+            end = timer()
+            print('indi + halfgrid ', end-start)
+
+        if self.verbose >= 1:
+            start = timer()
+        c1 = self.cor_mod1(c, self.gridshape.grid_sam) - gh
+        if self.verbose >= 1:
+            end = timer()
+            print('cor mod ', end-start)
+
+        if self.verbose >= 1:
+            start = timer()
         pos = c1[:]*apix+origin
-        
         r = np.sqrt(np.sum(np.square(pos), axis=1))
-        end = timer()
-        print('indices get r ', end-start)
+        if self.verbose >= 1:
+            end = timer()
+            print('indices get r ', end-start)
         #for i in range(len(r)):
         #    print(pos[i], c1[i], gt[1][i], r[i])
-        start = timer()
+        if self.verbose >= 1:
+            start = timer()
         print('self.rad ', self.rad)
-        r_ind = np.nonzero(r<self.rad)
+        r_ind = np.nonzero(r < self.rad)
         print(r_ind)
         #r = np.where(r < self.rad, self.fltr(r), 0.0)
         #r_ind = np.nonzero(r)
-        
-        end = timer()
-        print('nonzero transpose ', end-start)
+        if self.verbose >= 1:
+            end = timer()
+            print('nonzero transpose ', end-start)
 
-        start = timer()
-        count=0
+        if self.verbose >= 1:
+            start = timer()
+        count = 0
+        # fill the radial function map
         for i in r_ind[0]:
             rf = self.fltr(r[i])
             f000 += rf
             #print(gt[1][i][0], gt[1][i][1], gt[1][i][2], rf)
-            count+=1
+            count += 1
             self.fltr_data_r[self.gt[1][i][0], self.gt[1][i][1], self.gt[1][i][2]] = rf #[i]
-        end = timer()
+        if self.verbose >= 1:
+            end = timer()
+            print('fill radial function map ', end-start)
+            print('count ', count)
         '''
         count = 0
         print('self.rad ', self.rad)
@@ -483,25 +502,37 @@ class radial_fltr:
                 print(r)
                 #self.fltr_data_r[xyz[2], xyz[1], xyz[0]] = r
                 count+=1
-        
         end=timer()
         '''
-        print('fill radial function map ', end-start)
-        print('count ', count)
-        
+        # calc scale factor
         self.scale = 1.0/f000
         print('scale, ', self.scale, ' f000, ', f000)
 
     def cor_mod1(self, a, b):
+        """
+        Returns corrected remainder of division. If remainder <0,
+        then adds value b to remainder.
+        Arguments
+        *a*
+          array of Dividend (z,y,x indices)
+        *b*
+          array of Divisor (z,y,x indices)
+        """
         c = np.fmod(a, b)
-        d = np.transpose(np.nonzero(c<0))
+        d = np.transpose(np.nonzero(c < 0))
         #d, e = np.nonzero(c<0)
-        for i in d: #range(len(d)):
+        for i in d:  #range(len(d)):
             c[i[0], i[1]] += b[i[1]]
             #c[i, j] += b[i]
         return c
 
     def fltr(self, r):
+        """
+        Returns radius value from filter function
+        Arguments
+        *r*
+          radius
+        """
         if r < self.radius:
             if self.function == 2:
                 return pow((1.0-r)/self.radius, 2)
@@ -511,130 +542,58 @@ class radial_fltr:
                 return 1.0
         else:
             return 0.0
-    
 
     def mapfilter(self, data_arr, fft_obj, ifft_obj):
-        # 2 March
-        # something wrong with map filter the center is incorrect
-        #g = densmap.box_size()  # ZYX format, size of each direction
-        #g_reci = (densmap.z_size(), densmap.y_size(), int(densmap.x_size()//2+1))
-        #g_real = (g_reci[0], g_reci[1], (g_reci[2]-1)*2)
+        """
+        Returns filtered data
+        Argument
+        *data_arr*
+          array of data to be filtered
+        *fft_obj*
+          fft object
+        *ifft_obj*
+          ifft object
+        """
+        # copy map data and filter data
         data_r = np.zeros(self.gridshape.grid_sam, dtype='float64')
-        data_r[:,:,:] = data_arr[:,:,:]
+        data_r = data_arr.copy()
         fltr_input = np.zeros(self.gridshape.grid_sam, dtype='float64')
-        fltr_input[:,:,:] = self.fltr_data_r[:,:,:]
-        #boxvol = map_box_vol(densmap)
-        #fltr_data_r = np.zeros(data_r.shape, dtype='float64')
+        fltr_input = self.fltr_data_r.copy()
         
-        
-        # determine effective radius of radial function
-        '''nrad = 1000
-        drad = 0.25
-        sum_r = [0.0]*nrad
-    
-        for i in range(0, nrad):
-            r = drad * (float(i) + 0.5)
-            sum_r[i] = r*r*math.fabs(self.fltr(r))
-        
-        for i in range(1, nrad):
-            sum_r[i] += sum_r[i-1]
-        for i in range(0, nrad):
-            if sum_r[i] > 0.99*sum_r[nrad-1]:
-                break
-        rad = drad*(float(i)+1.0)
-        '''
-        # fill the radial function map
-        
-        #g_half = (g[0]//2, g[1]//2, g[2]//2)
-        #start = timer()
-        #SB = StructureBlurrer()
-        #gt = SB.maptree(densmap)
-        #end = timer()
-        #print('maptree ', end-start)
-        
-        
-        '''
-        for cz in range(0, g[0]):    # z
-            for cy in range(0, g[1]):     # y
-                for cx in range(0, g[2]):    # x
-        '''                 
-        
-        # calc scale factor
-        # either 1.0 or 1/f000(default)
-        #scale = 1.0 / f000
-        #print('scale, ', scale, ' f000, ', f000)
-        # fft
-        start = timer()
-        #fltr_data_c = fourier_transform(fltr_data_r, 1.0, conj=True)
+        if self.verbose >= 1:
+            start = timer()
+        # create complex data array
         fltr_data_c = np.zeros(self.gridshape.g_reci, dtype='complex128')
         data_c = np.zeros(self.gridshape.g_reci, dtype='complex128')
-        
+        # fourier transform of filter data
         fltr_data_c = fft_obj(fltr_input, fltr_data_c)
-        fltr_data_c[:,:,:] = (fltr_data_c[:,:,:]).conjugate()
-        end = timer()
-        #rint('fft_fltdata ', end-start)
-        start = timer()
-        #data_c = fourier_transform(data_r, 1.0, conj=True)
+        fltr_data_c = fltr_data_c.conjugate().copy()
+        if self.versbose >= 1:
+            end = timer()
+            print('fft fltr_data : {0}s'.format(end-start))
+        if self.versbose >= 1:
+            start = timer()
+        # fourier transform of map data
         data_c = fft_obj(data_r, data_c)
-        data_c[:,:,:] = (data_c[:,:,:]).conjugate()
-        end = timer()
-        #print('fftdata ', end-start)
-        # do filter
-        #for cz in range(0, g_reci[0]):    # z
-        #    for cy in range(0, g_reci[1]):     # y
-        #        for cx in range(0, g_reci[2]):    # x
-        start = timer()
-        data_c[:,:,:] = self.scale*data_c[:,:,:]*fltr_data_c[:,:,:]
-        end = timer()
-        #print('convolution ', end-start)
-    
-        # ifft
-        #densmap_g_real_size = g_real[0]*g_real[1]*g_real[2]
-        start = timer()
-        #data_r = inv_fourier_transform(data_c, 1.0, g_reci, conj=True) # densmap_g_real_size/pow(boxvol,2)
-        data_c[:,:,:] = (data_c[:,:,:]).conjugate()
+        data_c = data_c.conjugate().copy()
+        if self.versbose >= 1:
+            end = timer()
+            print('fft data : {0}s'.format(end-start))
+        # apply filter
+        if self.verbose >= 1:
+            start = timer()
+        data_c[:, :, :] = self.scale*data_c[:, :, :]*fltr_data_c[:, :, :]
+        if self.verbose >= 1:
+            end = timer()
+            print('Convolution : {0}s'.format(end-start))
+
+        # inverse fft
+        if self.verbose >= 1:
+            start = timer()
+        data_c = data_c.conjugate().copy()
         data_r = ifft_obj(data_c, data_r)
-        end = timer()
-        #print('ifft ', end-start)
+        if self.verbose >= 1:
+            end = timer()
+            print('ifft : {0}s'.format(end-start))
+
         return data_r
-
-
-def solve_linal(a, b):
-
-    if a.shape[0] != a.shape[1]:
-        #print("matrix not square")
-        raise ValueError('matrix not square')
-        #return(-1)
-    if a.shape[0] != b.size:
-        #print("matrix/vector mismatch")
-        raise ValueError('matrix/vector mismatch')
-        #return(-1)
-    
-    n = a.shape[0] #rows
-    #a = copy.deepcopy(mat)
-    #b = copy.deepcopy(vec)
-    #solve for X by Gaussian elimination
-    for i in range(0, n):
-        #pick largest pivot
-        j = i
-        for k in range(i+1, n):
-            if np.fabs(a[k, i]) > np.fabs(a[j, i]):
-                j = k
-        # swap rows
-        for k in range(0, n):
-            a[i,k], a[j,k] = a[j, k], a[i, k]
-        b[i], b[j] = b[j], b[i]
-
-        # perform elimination
-        pivot = a[i, i]
-        for j in range(0, n):
-            if j != i:
-                s = a[j, i] / pivot
-                for k in range(i+1, n):
-                    a[j, k] = a[j, k] - s*a[i, k]
-                b[j] = b[j] - s*b[i]
-    
-    for i in range(0, n):
-        b[i] /= a[i,i]
-    
-    return b

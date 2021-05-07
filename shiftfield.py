@@ -6,20 +6,11 @@
 from TEMPy.maps.em_map import Map
 from TEMPy.math.vector import Vector
 '''
-from TEMPy.StructureBlurrer import StructureBlurrer
 from TEMPy.EMMap import Map
-from TEMPy.Vector import Vector
 
 import numpy as np
 from timeit import default_timer as timer
-import esf_map_calc as emc
 import shiftfield_util as sf_util
-
-try:
-    import pyfftw
-    pyfftw_flag = True
-except ImportError:
-    pyfftw_flag = False
 
 
 def shift_field_coord(cmap, dmap, mask, x1map, x2map, x3map, rad, fltr,
