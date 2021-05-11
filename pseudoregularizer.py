@@ -368,49 +368,50 @@ class Pseudoregularize:
     '''
       
 
-ippdb = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent'
-struct = PDBParser.read_PDB_file('5ni1', ippdb, hetatm=False, water=False)
-workpdb = '/home/swh514/Projects/testing_ground/shiftfield_python/testrun/check_FT/test_12Apr/testout_sheetbend1_withorthmat_final.pdb'
-workstruc = PDBParser.read_PDB_file('5ni1', workpdb, hetatm=False, water=False)
+if __name__ == '__main__':
+    ippdb = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent'
+    struct = PDBParser.read_PDB_file('5ni1', ippdb, hetatm=False, water=False)
+    workpdb = '/home/swh514/Projects/testing_ground/shiftfield_python/testrun/check_FT/test_12Apr/testout_sheetbend1_withorthmat_final.pdb'
+    workstruc = PDBParser.read_PDB_file('5ni1', workpdb, hetatm=False, water=False)
 
-pr = Pseudoregularize(struct)
+    pr = Pseudoregularize(struct)
 
-# test
-ref_A = struct.get_chain('A')
-work_A = workstruc.get_chain('A')
+    # test
+    ref_A = struct.get_chain('A')
+    work_A = workstruc.get_chain('A')
 
-rot, trans = RTop_orth(work_A, ref_A)
-
-
-#newmol = pr.regularize_frag(workstruc)
-
-#newmol.write_to_PDB('test_psedoreg_outfile_4.pdb')
-# 28 april working, but slight problem with eigenvec and quaternion arrangement from matrix
-# different from clipper
-# 30 april done. work fine same output as C++ shiftfield's pseudoregulariser
-# initial problem was applying rotation+translation to the wrong coord (suppose to be the initial(ori) coord)
+    rot, trans = RTop_orth(work_A, ref_A)
 
 
-#fL = pr.get_fraglist()
-#print(fL)
+    #newmol = pr.regularize_frag(workstruc)
 
-#for i in pr.fragsResRange:
-#  print(i)
-
-#pr.regularize_frag(struct)
-
-#PROBLEMS:
-#numbering not in the residues number also printed 142-200 - solved using get_selection
-#probably can use the atom.init_x,y,z to get do the weights and frags
-#need to think of a way to update the atoms position and also return the structure
-#-can just combine BioPyStruc of fragments, then combine, split chains, reorder
+    #newmol.write_to_PDB('test_psedoreg_outfile_4.pdb')
+    # 28 april working, but slight problem with eigenvec and quaternion arrangement from matrix
+    # different from clipper
+    # 30 april done. work fine same output as C++ shiftfield's pseudoregulariser
+    # initial problem was applying rotation+translation to the wrong coord (suppose to be the initial(ori) coord)
 
 
+    #fL = pr.get_fraglist()
+    #print(fL)
+
+    #for i in pr.fragsResRange:
+    #  print(i)
+
+    #pr.regularize_frag(struct)
+
+    #PROBLEMS:
+    #numbering not in the residues number also printed 142-200 - solved using get_selection
+    #probably can use the atom.init_x,y,z to get do the weights and frags
+    #need to think of a way to update the atoms position and also return the structure
+    #-can just combine BioPyStruc of fragments, then combine, split chains, reorder
 
 
-#elastic neural network james krieger (2019) Neuroscie Lett 700 22-29
-# doruker et al Proteins 40 (2000)
-# atilgan et al Biophys J 80 (2001)
-# Bahar et al 2010, chem reviews 110 1463:1497
 
-#CryoDRGN NeRF, ECCV 2020
+
+    #elastic neural network james krieger (2019) Neuroscie Lett 700 22-29
+    # doruker et al Proteins 40 (2000)
+    # atilgan et al Biophys J 80 (2001)
+    # Bahar et al 2010, chem reviews 110 1463:1497
+
+    #CryoDRGN NeRF, ECCV 2020

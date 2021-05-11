@@ -177,12 +177,23 @@ def eightpi2():
 def u2b(u_iso):
     """
     Returns the isotropic B-value
-    Converts Isotropic U-value to B value
+    Converts Isotropic U-value to B-value
     Argument
     *u_iso*
       isotropic U-value
     """
     return u_iso * eightpi2()
+
+
+def b2u(b_iso):
+    """
+    Returns the isotropic U-value
+    Converts Isotropic B-value to U-value
+    Argument
+    *u_iso*
+      isotropic U-value
+    """
+    return b_iso / eightpi2()
 
 
 class Cell:
@@ -568,15 +579,15 @@ class radial_fltr:
         # fourier transform of filter data
         fltr_data_c = fft_obj(fltr_input, fltr_data_c)
         fltr_data_c = fltr_data_c.conjugate().copy()
-        if self.versbose >= 1:
+        if self.verbose >= 1:
             end = timer()
             print('fft fltr_data : {0}s'.format(end-start))
-        if self.versbose >= 1:
+        if self.verbose >= 1:
             start = timer()
         # fourier transform of map data
         data_c = fft_obj(data_r, data_c)
         data_c = data_c.conjugate().copy()
-        if self.versbose >= 1:
+        if self.verbose >= 1:
             end = timer()
             print('fft data : {0}s'.format(end-start))
         # apply filter
@@ -597,3 +608,54 @@ class radial_fltr:
             print('ifft : {0}s'.format(end-start))
 
         return data_r
+
+
+# @dataclass #from dataclasses import dataclass
+class results_by_cycle:
+    '''
+    Dataclass to stor results for each cycle.
+    '''
+    def __init__(self, cyclerr, cycle, resolution, radius,
+                 envscore, envscore_reso, fscavg):
+        self.cyclerr = cyclerr
+        self.cycle = cycle
+        self.resolution = resolution
+        self.radius = radius
+        self.envscore = envscore
+        self.envscore_reso = envscore_reso
+        self.fscavg = fscavg
+    '''
+    cyclerr: int
+    cycle: int
+    resolution: float
+    radius: float
+    envscore: float
+    envscore_reso: float
+    fscavg: float
+    '''
+    def write_xml_results_start(self, f):
+        f.write('<SheetbendResult>\n')
+        f.write(' <Title>{0}</Title>\n'.format('temp'))
+        f.write(' <Cycles>\n')
+        
+    def write_xml_results_end(self, f):
+        f.write(' </Cycles>\n')
+        f.write(' <Final>\n')
+        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'.format(self.cyclerr+1))
+        f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
+        f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
+        f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
+        f.write('   <EnvelopeScore>{0}</EnvelopeScore>\n'.format(self.envscore))
+        f.write('   <EnvelopeScoreAtResolution>{0}</EnvelopeScoreAtResolution>\n'.format(self.envscore_reso))
+        f.write(' </Final>\n')
+        f.write('</SheetbendResult\n')
+    
+    def write_xml_results_cyc(self, f):
+        f.write('  <Cycle>\n')
+        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'.format(self.cyclerr+1))
+        f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
+        f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
+        f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
+        f.write('   <EnvelopeScore>{0}</EnvelopeScore>\n'.format(self.envscore))
+        f.write('   <EnvelopeScoreAtResolution>{0}</EnvelopeScoreAtResolution>\n'.format(self.envscore_reso))
+        f.write('  </Cycle>\n')

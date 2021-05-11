@@ -1,5 +1,7 @@
-import math
-# mapin = mp.readMRC('/home/swh514/Projects/data/EMD-3488/map/emd_3488.map')
+# Python implementation of csheebend to perform shift field refinement
+# Copyright 2018 Kevin Cowtan & University of York all rights reserved
+# Author: Soon Wen Hoh, University of York 2020
+
 '''from TEMPy.protein.structure_blurrer import StructureBlurrer
 from TEMPy.protein.scoring_functions import ScoringFunctions
 from TEMPy.protein.structure_parser import PDBParser
@@ -13,41 +15,79 @@ from TEMPy.ScoringFunctions import ScoringFunctions
 from TEMPy.StructureParser import PDBParser
 from TEMPy.MapParser import MapParser as mp
 from TEMPy.EMMap import Map
-from TEMPy.Vector import Vector
 from TEMPy.mapprocess.mapfilters import Filter
 from TEMPy.mapprocess import array_utils
 
 import numpy as np
 from timeit import default_timer as timer
 import esf_map_calc as emc
-#from dataclasses import dataclass
 import shiftfield as shiftfield
 import shiftfield_util as sf_util
-from scipy import signal
-from scipy.interpolate import griddata
 from scipy.interpolate import Rbf
 import pseudoregularizer
 import os
 import sys
-
-sys.path.append('/home/swh514/Projects/testing_ground')
 import scale_map.map_scaling as DFM
 
-if sys.version_info[0] > 2:
-    from builtins import isinstance
-#else:
-#    from __builtins__ import isinstance
+from sheetbend_cmdln_parser import sheetbendParser
 
-# input parameters
-# ippdb = input pdb
-# ipmap = input map
+# Parse command line input
+SP = sheetbendParser()
+SP.get_args()
+# Set variables from parsed arguments
+ippdb = SP.args.pdbin
+ipmap = SP.args.mapin
+if ippdb is None and ipmap is None:
+    print('No input map or input structure. What do you want to do?\nProgram terminated...')
+    exit()
 
+ipmap1 = SP.args.mapin1
+opmap = SP.args.mapout  # sheetbend_mapout_result.map
+oppdb = SP.args.pdbout  # sheetbend_pdbout_result.pdb
+res = SP.args.res  # -1.0
+resbycyc = SP.args.res_by_cyc  # None
+ncyc = SP.args.cycle  # 1
+refxyz = SP.args.refxyz  # False
+refuiso = SP.args.refuiso  # False
+postrefxyz = SP.args.postrefxyz  # False
+postrefuiso = SP.args.postrefuiso  # False
+pseudoreg = SP.args.pseudoreg  # False
+rad = SP.args.rad  # -1.0
+radscl = SP.args.radscl  # 5.0
+xmlout = SP.args.xmlout  # program.xml
+verbose = SP.args.verbose  # 0
+ncycrr = 1  # refine-regularise-cycle
+fltr = 2  # quadratic filter
+hetatom = False
+biso_range = SP.args.biso_range
+ulo_abs = sf_util.b2u(biso_range[0])
+uhi_abs = sf_util.b2u(biso_range[1])
+
+# temp
+inclconst = False
+# defaults
+#if res <= 0.0:
+#    print('Please specify the resolution of the map!')
+#    exit()
+
+if not refxyz and not refuiso:
+    refxyz = True
+
+if resbycyc is None:
+    if res > 0.0:
+        resbycyc = [res]
+    else:
+        print('Please specify the resolution of the map or resolution by cycle.')
+        exit()
+
+if refuiso or postrefuiso:
+    print('B-factor bounds : {0} < B < {1}'.format(biso_range[0], biso_range[1]))
+
+'''
 #ippdb = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent'
 ippdb = '/home/swh514/Projects/testing_ground/shiftfield_python/testrun/translate_1_5ni1_a.pdb'    #translate_1_5ni1_a.pdb'
 #ippdb = '/home/swh514/Projects/testing_ground/shiftfield_python/testrun/check_FT/trans1angxyz_uiso/initial_testout_sheetbend1_withorthmat_3.pdb'
 ipmap = '/home/swh514/Projects/data/EMD-3488/map/emd_3488.map'
-print('pdb: {0}'.format(ippdb))
-print('map: {0}'.format(ipmap))
 rad = -1.0
 radscl = 4.0 # def 4.0
 res = 6
@@ -63,81 +103,23 @@ pseudoreg = True
 hetatom = False
 # defaults
 refxyz = True # in future for xyx, uiso, aniso
-if res <= 0.0:
-    print('Please specify the resolution of the map!')
-    exit()
-
+'''
 
 print('Radscl: {0}'.format(radscl))
 if len(resbycyc) == 0:
     resbycyc.append(res)
 
-# results
+# initialise results list
 results = []
-
-#@dataclass
-class results_by_cycle:
-
-    def __init__(self, cyclerr, cycle, resolution, radius,
-                 envscore, envscore_reso, fscavg):
-        self.cyclerr = cyclerr
-        self.cycle = cycle
-        self.resolution = resolution
-        self.radius = radius
-        self.envscore = envscore
-        self.envscore_reso = envscore_reso
-        self.fscavg = fscavg
-    '''
-    cyclerr: int
-    cycle: int
-    resolution: float
-    radius: float
-    envscore: float
-    envscore_reso: float
-    fscavg: float
-    '''
-    def write_xml_results_start(self, f):
-        f.write('<SheetbendResult>\n')
-        f.write(' <Title>{0}</Title>\n'.format('temp'))
-        f.write(' <Cycles>\n')
-        
-    def write_xml_results_end(self, f):
-        f.write(' </Cycles>\n')
-        f.write(' <Final>\n')
-        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'.format(self.cyclerr+1))
-        f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
-        f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
-        f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
-        f.write('   <EnvelopeScore>{0}</EnvelopeScore>\n'.format(self.envscore))
-        f.write('   <EnvelopeScoreAtResolution>{0}</EnvelopeScoreAtResolution>\n'.format(self.envscore_reso))
-        f.write(' </Final>\n')
-        f.write('</SheetbendResult\n')
-    
-    def write_xml_results_cyc(self, f):
-        f.write('  <Cycle>\n')
-        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'.format(self.cyclerr+1))
-        f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
-        f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
-        f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
-        f.write('   <EnvelopeScore>{0}</EnvelopeScore>\n'.format(self.envscore))
-        f.write('   <EnvelopeScoreAtResolution>{0}</EnvelopeScoreAtResolution>\n'.format(self.envscore_reso))
-        f.write('  </Cycle>\n')
-        
-        
 
 # read model
 struc_id = os.path.basename(ippdb).split('.')[0]
 # for psedoregularizer use BioPy structure
-original_structure_BioPy = PDBParser.read_PDB_file_BioPy(struc_id, 
-                                                         ippdb,
-                                                         hetatm=hetatom,
-                                                         water=False)
+# original_structure_BioPy = PDBParser.read_PDB_file_BioPy(struc_id, 
+#                                                         ippdb,
+#                                                         hetatm=hetatom,
+#                                                         water=False)
 # TEMPy structure class
-#structure_instance = PDBParser._bio_strcuture_to_TEMpy(ippdb,
-#                                                       struc_id,
-#                                                       hetatm=True,
-#                                                       water=False)
-                                                       
 structure_instance = PDBParser.read_PDB_file(struc_id,
                                              ippdb,
                                              hetatm=hetatom,
@@ -147,27 +129,29 @@ original_structure = structure_instance.copy()
 mapin = mp.readMRC(ipmap)
 scorer = ScoringFunctions()
 SB = StructureBlurrer()
-
+# get cell details
 cell = sf_util.Cell(mapin.header[10], mapin.header[11], mapin.header[12],
                     mapin.header[13], mapin.header[14], mapin.header[15])
-
+# set gridshape
+# maybe need to do a prime number check on grid dimensions
 gridshape = sf_util.grid_dim(mapin)
-start = timer()
+if verbose >= 1:
+    start = timer()
 fft_obj = sf_util.plan_fft(gridshape)
-end = timer()
-#print('plan fft ', end-start)
-#maybe do a prime number check on grid dimensions
+if verbose >= 1:
+    end = timer()
+    print('plan fft : {0} s'.format(end-start))
 
-start = timer()
+if verbose >= 1:
+    start = timer()
 ifft_obj = sf_util.plan_ifft(gridshape)
-end = timer()
+if verbose >= 1:
+    end = timer()
+    print('plan ifft : {0} s'.format(end-start))
 if pseudoreg:
     print('PSEUDOREGULARIZE')
-    start = timer()
     preg = pseudoregularizer.Pseudoregularize(original_structure)
 
-    
-#print('plan ifft ', end-start)
 # loop over refine regularise cycles
 for cycrr in range(0, ncycrr):
     print('\nRefine-regularise cycle: {0}\n'.format(cycrr+1))
@@ -430,7 +414,7 @@ for cycrr in range(0, ncycrr):
                 atm.temp_fac = atm.temp_fac - sf_util.u2b(du)
                 
 
-        temp_result = results_by_cycle(cycrr, cyc, rcyc, radcyc, 
+        temp_result = sf_util.results_by_cycle(cycrr, cyc, rcyc, radcyc, 
                                        score_mod, score_mod_curreso, 0.0)
         '''
         temp_result = results_by_cycle()
