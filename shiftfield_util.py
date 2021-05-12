@@ -55,6 +55,26 @@ def mapGridPositions_radius(densMap, atom, gridtree, radius):
         print('Warning, atom out of map box')
         return []
 
+def make_atom_overlay_map1_rad(densMap, prot, gridtree, rad):
+    """
+    Returns a Map instance with atom locations recorded on
+    the voxel within radius with a value of 1
+    """
+    densMap = densMap.copy()
+    densMap.fullMap = densMap.fullMap * 0.0
+    # use mapgridpositions to get the points within radius. faster and efficient
+    # this works. resample map before assigning density
+    for atm in prot:
+        # get list of nearest points of an atom
+        points = mapGridPositions_radius(densMap, atm, gridtree[0], rad)
+        for ind in points:
+            pos = gridtree[1][ind]
+            p_z = int(pos[2] - densMap.apix/2.0)
+            p_y = int(pos[1] - densMap.apix/2.0)
+            p_x = int(pos[0] - densMap.apix/2.0)
+            densMap.fullMap[p_z, p_y, p_x] = 1.0
+    return densMap
+
 
 class grid_dim:
     """
@@ -400,7 +420,7 @@ class radial_fltr:
         *densmap*
           reference density map
         """
-        self.verbose = 1
+        self.verbose = 0
         self.radius = radcyc
         self.function = function
         '''if function == 'step':
@@ -493,6 +513,7 @@ class radial_fltr:
             #print(gt[1][i][0], gt[1][i][1], gt[1][i][2], rf)
             count += 1
             self.fltr_data_r[self.gt[1][i][0], self.gt[1][i][1], self.gt[1][i][2]] = rf #[i]
+        
         if self.verbose >= 1:
             end = timer()
             print('fill radial function map ', end-start)

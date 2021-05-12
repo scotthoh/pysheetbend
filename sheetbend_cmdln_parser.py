@@ -247,5 +247,5 @@ class sheetbendParser(object):
                 if arg_val > 0:
                     print(arg, arg_val)
             if isinstance(arg_val, str):
-                if not None:
+                if arg_val is not None:
                     print(arg, arg_val)

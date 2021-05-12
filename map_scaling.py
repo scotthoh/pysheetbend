@@ -5,6 +5,7 @@ import os
 from TEMPy.mapprocess import mapcompare
 from TEMPy.mapprocess import Filter
 from TEMPy.MapParser import MapParser
+from TEMPy.EMMap import Map
 '''
 from TEMPy.map_process import mapcompare
 from TEMPy.map_process import Filter
@@ -78,8 +79,16 @@ def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
             
     #rite_mapfile(emmap2, '{0}/pdbin_emmap2.map'.format(outdir))
     #print('in map scaling, {0}'.format(str(emmap2.fullMap.dtype)))
-    c1 = emmap1.calculate_map_contour(sigma_factor=2.0)
-    c2 = emmap2.calculate_map_contour(sigma_factor=2.0)
+    if res1 > 4.0:
+        t1 = 2.0
+    else:
+        t1 = 2.5
+    if res2 > 4.0:
+        t2 = 2.0
+    else:
+        t2 = 2.5
+    c1 = emmap1.calculate_map_contour(sigma_factor=t1)
+    c2 = emmap2.calculate_map_contour(sigma_factor=t2)
     #print(emmap1.box_size(), emmap1.apix, c1)
     #print(emmap2.box_size(), emmap2.apix, c2)
     
