@@ -155,38 +155,85 @@ def shift_field_coord(cmap, dmap, mask, x1map, x2map, x3map, rad, fltr,
     # calculate U shifts
     count = 0
     start = timer()
+    m = np.zeros([cmap.fullMap.size,3,3])
+    v = np.zeros([cmap.fullMap.size, 3])
+    x11_f = np.ravel(x11map)
+    x12_f = np.ravel(x12map)
+    x13_f = np.ravel(x13map)
+    x22_f = np.ravel(x22map)
+    x23_f = np.ravel(x23map)
+    x33_f = np.ravel(x33map)
+    y1map_f = np.ravel(y1map)
+    y2map_f = np.ravel(y2map)
+    y3map_f = np.ravel(y3map)
+    # flatten arrays and assign to matrix and vector
+    v[:, 0] = y1map_f
+    v[:, 1] = y2map_f
+    v[:, 2] = y3map_f
+    m[:, 0, 0] = x11_f
+    m[:, 0, 1] = x12_f
+    m[:, 1, 0] = x12_f
+    m[:, 0, 2] = x13_f
+    m[:, 2, 0] = x13_f
+    m[:, 1, 1] = x22_f
+    m[:, 1, 2] = x23_f
+    m[:, 2, 1] = x23_f
+    m[:, 2, 2] = x33_f
+    end = timer()
+    print('Set matrix : {0} s'.format(end-start))
+    start = timer()
+    v[:] = np.linalg.solve(m[:], v[:])
+    end = timer()
+    print('Solve linalg : {0} s'.format(end-start))
+    start = timer()
+    x1map_f = v[:, 0]
+    x2map_f = v[:, 1]
+    x3map_f = v[:, 2]
+    # reassign values back to fullMaps
+    x1map.fullMap = x1map_f.reshape(cmap.box_size())
+    x2map.fullMap = x2map_f.reshape(cmap.box_size())
+    x3map.fullMap = x3map_f.reshape(cmap.box_size())
+    '''for index in range(0, cmap.fullMap.size):
+        pos = mf.gt[1][index]  # gt from maptree_zyx
+        p_zyx = (pos[0], pos[1], pos[2])
+        x1map.fullMap[p_zyx] = v[index][0]  # .x  # [0]
+        x2map.fullMap[p_zyx] = v[index][1]  # .y  # [1]
+        x3map.fullMap[p_zyx] = v[index][2]  # .z  # [2]
+    '''
+    end = timer()
+    print('Copy answer : {0} s'.format(end-start))
+    '''
     for index in range(0, cmap.fullMap.size):
         # vector v
         pos = mf.gt[1][index]  # gt from maptree_zyx
         p_zyx = (pos[0], pos[1], pos[2])
-        v = np.array([y1map[p_zyx], y2map[p_zyx], y3map[p_zyx]])  # Vector(x, y, z) 
+        #v[index][0] = np.array([y1map[p_zyx], y2map[p_zyx], y3map[p_zyx]])  # Vector(x, y, z) 
+        v[index][0] = y1map[p_zyx]  # Vector(x, y, z) 
+        v[index][1] = y2map[p_zyx]  # Vector(x, y, z) 
+        v[index][2] = y3map[p_zyx]  # Vector(x, y, z) 
         # matrix(3,3)
-        m = np.zeros([3, 3])
-        m[0, 0] = x11map[p_zyx]
-        m[0, 1] = x12map[p_zyx]
-        m[1, 0] = x12map[p_zyx]
-        m[0, 2] = x13map[p_zyx]
-        m[2, 0] = x13map[p_zyx]
-        m[1, 1] = x22map[p_zyx]
-        m[1, 2] = x23map[p_zyx]
-        m[2, 1] = x23map[p_zyx]
-        m[2, 2] = x33map[p_zyx]
+        #m = np.zeros([3, 3])
+        m[index][0, 0] = x11map[p_zyx]
+        m[index][0, 1] = x12map[p_zyx]
+        m[index][1, 0] = x12map[p_zyx]
+        m[index][0, 2] = x13map[p_zyx]
+        m[index][2, 0] = x13map[p_zyx]
+        m[index][1, 1] = x22map[p_zyx]
+        m[index][1, 2] = x23map[p_zyx]
+        m[index][2, 1] = x23map[p_zyx]
+        m[index][2, 2] = x33map[p_zyx]
         # solve matrix v c++ m.solve(v)
         # solve linear eq Ax=b for x
         # can use numpy.linalg.solve
         
-        try:
-            v = np.linalg.solve(m, v)
-        except np.linalg.LinAlgError:
-            count += 1
-            pass  # print(v)
-
-        x1map.fullMap[p_zyx] = v[0]  # .x  # [0]
-        x2map.fullMap[p_zyx] = v[1]  # .y  # [1]
-        x3map.fullMap[p_zyx] = v[2]  # .z  # [2]
+        #try:
+        #    v = np.linalg.solve(m, v)
+        #except np.linalg.LinAlgError:
+        #    count += 1
+        #    pass  # print(v)
+    '''
     
-    end = timer()
-    print('linalg : {0} s'.format(end-start))
+    
     # 2 - z and x axis swap in np array becomes x,y,z 
     # 3 - back using z,y,x convention by tempy map
     # 4 - fixed hkl cv - chv to cv + chv ... no change since return modulus

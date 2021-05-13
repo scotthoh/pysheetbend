@@ -26,7 +26,6 @@ import shiftfield_util as sf_util
 from scipy.interpolate import Rbf
 import pseudoregularizer
 import os
-import sys
 import scale_map.map_scaling as DFM
 
 from sheetbend_cmdln_parser import sheetbendParser
@@ -38,7 +37,8 @@ SP.get_args()
 ippdb = SP.args.pdbin
 ipmap = SP.args.mapin
 if ippdb is None and ipmap is None:
-    print('No input map or input structure. What do you want to do?\nProgram terminated...')
+    print('No input map or input structure. What do you want to do?\n\
+          Program terminated...')
     exit()
 
 ipmap1 = SP.args.mapin1
@@ -55,13 +55,14 @@ pseudoreg = SP.args.pseudoreg  # False
 rad = SP.args.rad  # -1.0
 radscl = SP.args.radscl  # 5.0
 xmlout = SP.args.xmlout  # program.xml
+output_intermediate = SP.args.intermediate  # False
 verbose = SP.args.verbose  # 0
 ncycrr = 1  # refine-regularise-cycle
 fltr = 2  # quadratic filter
 hetatom = False
 biso_range = SP.args.biso_range
-ulo_abs = sf_util.b2u(biso_range[0])
-uhi_abs = sf_util.b2u(biso_range[1])
+ulo = sf_util.b2u(biso_range[0])
+uhi = sf_util.b2u(biso_range[1])
 
 # temp
 inclconst = False
@@ -77,11 +78,13 @@ if resbycyc is None:
     if res > 0.0:
         resbycyc = [res]
     else:
-        print('Please specify the resolution of the map or resolution by cycle.')
+        print('Please specify the resolution of the map or \
+               resolution by cycle.')
         exit()
 
 if refuiso or postrefuiso:
-    print('B-factor bounds : {0} < B < {1}'.format(biso_range[0], biso_range[1]))
+    print('B-factor bounds : {0} < B < {1}'.format(biso_range[0],
+                                                   biso_range[1]))
 
 '''
 #ippdb = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent'
@@ -122,9 +125,9 @@ if ippdb is not None:
     #                                                         water=False)
     # TEMPy structure class
     structure_instance = PDBParser.read_PDB_file(struc_id,
-                                                ippdb,
-                                                hetatm=hetatom,
-                                                water=False)
+                                                 ippdb,
+                                                 hetatm=hetatom,
+                                                 water=False)
     original_structure = structure_instance.copy()
 # read map
 if ipmap is not None:
@@ -163,6 +166,8 @@ if ippdb is not None:
     # Loop over refine regularise cycles
     for cycrr in range(0, ncycrr):
         print('\nRefine-regularise cycle: {0}\n'.format(cycrr+1))
+        # calculate input map threshold/contour
+        mapin_t = scorer.calculate_map_threshold(mapin)
         # loop over cycles
         for cyc in range(0, ncyc):
             shift_vars = []
@@ -192,14 +197,14 @@ if ippdb is not None:
             # 1/Angs = freq or apix/reso = freq?
             ftfilter = array_utils.tanh_lowpass(fltrmap.fullMap.shape,
                                                 mapin.apix/rcyc, fall=0.5)
-            lowpass_map = fltrmap.fourier_filter(ftfilter=ftfilter,
-                                                 inplace=False)
-            lowpass_map.set_apix_tempy()
-            map_curreso = Map(lowpass_map.fullMap, lowpass_map.origin,
-                              lowpass_map.apix, mapin.filename)
+            lp_map = fltrmap.fourier_filter(ftfilter=ftfilter,
+                                            inplace=False)
+            lp_map.set_apix_tempy()
+            map_curreso = Map(lp_map.fullMap, lp_map.origin,
+                              lp_map.apix, mapin.filename)
             if verbose > 5:
-                print(lowpass_map.__class__.__name__)
-                print(lowpass_map.apix)
+                print(lp_map.__class__.__name__)
+                print(lp_map.apix)
                 print(map_curreso.__class__.__name__)
                 print(map_curreso.apix)
             # Calculate electron density with b-factors from input model
@@ -209,16 +214,16 @@ if ippdb is not None:
             fltr_cmap = Filter(cmap)
             ftfilter = array_utils.tanh_lowpass(fltr_cmap.fullMap.shape,
                                                 mapin.apix/rcyc, fall=0.5)
-            lowpass_cmap = fltr_cmap.fourier_filter(ftfilter=ftfilter,
-                                                    inplace=False)
+            lp_cmap = fltr_cmap.fourier_filter(ftfilter=ftfilter,
+                                               inplace=False)
             if verbose >= 1:
                 end = timer()
                 print('density calc ', end-start)
             if verbose > 5 and cyc == 0:
-                DFM.write_mapfile(lowpass_cmap, 'cmap_cyc1.map')
+                DFM.write_mapfile(lp_cmap, 'cmap_cyc1.map')
                 map_curreso.write_to_MRC_file('mapcurreso_cyc1.map')
             if verbose > 5 and cyc == ncyc-1:
-                DFM.write_mapfile(lowpass_cmap, 'cmap_finalcyc.map')
+                DFM.write_mapfile(lp_cmap, 'cmap_finalcyc.map')
                 map_curreso.write_to_MRC_file('mapcurreso_final.map')
             # calculate fsc and envelope score(TEMPy) instead of R and R-free
             # use envelop score (TEMPy)... calculating average fsc
@@ -226,43 +231,42 @@ if ippdb is not None:
             if verbose >= 1:
                 start = timer()
             # calculate map contour
-            mapin_t = scorer.calculate_map_threshold(mapin)
-            print('Calculated input map volume threshold is {0}'.format(mapin_t))
             mapcurreso_t = scorer.calculate_map_threshold(map_curreso)
-            print('and is {0} at current resolution.'.format(mapcurreso_t))
-            
+            print('Calculated input map volume threshold is ', end='')
+            print('{0:.2f} and is {1:.2f} at current resolution.'
+                  .format(mapin_t, mapcurreso_t))
+
             # calculate model contour
-            if rcyc > 10.0:
+            t = 2.5 if rcyc > 10.0 else 2.0 if rcyc > 6.0 else 1.5
+            '''if rcyc > 10.0:
                 t = 2.5
             elif rcyc > 6.0:
                 t = 2.0
             else:
-                t = 1.5
+                t = 1.5'''
             cmap_t = 1.5*cmap.std()
-            fltrcmap_t = t*np.std(lowpass_cmap.fullMap)
-            print('Calculated model threshold is {0} and is {1} at current resolution'.format(cmap_t, fltrcmap_t))
+            fltrcmap_t = t*np.std(lp_cmap.fullMap)
+            print('Calculated model threshold is ', end='')
+            print('{0:.2f} and is {1:.2f} at current resolution'
+                  .format(cmap_t, fltrcmap_t))
 
-            overlap_map1, overlap_model1 = scorer.calculate_overlap_scores(mapin, cmap, mapin_t, cmap_t)
-            overlap_map2, overlap_model2 = scorer.calculate_overlap_scores(map_curreso, lowpass_cmap, mapcurreso_t, fltrcmap_t)
+            ovl_map1, ovl_mdl1 = scorer.calculate_overlap_scores(mapin, cmap,
+                                                                 mapin_t,
+                                                                 cmap_t)
+            ovl_map2, ovl_mdl2 = scorer.calculate_overlap_scores(map_curreso,
+                                                                 lp_cmap,
+                                                                 mapcurreso_t,
+                                                                 fltrcmap_t)
             
-            '''min_thr = mapin.get_primary_boundary(structure_instance.get_prot_mass_from_atoms(),
-                                                 mapin.min(), mapin.max(),)
-            score_mod = scorer.envelope_score(mapin, min_thr,
-                                              structure_instance)
-            min_thr_1 = map_curreso.get_primary_boundary(structure_instance.get_prot_mass_from_atoms(),
-                                                         map_curreso.min(),
-                                                         map_curreso.max(),)
-            score_mod_1 = scorer.envelope_score(map_curreso, min_thr_1,
-                                                structure_instance)'''
             if verbose >= 1:
                 end = timer()
                 print('Score mod: {0} s'.format(end-start))
 
-            print('TEMPys scores :') 
-            print('Fraction of map overlapping with model: {0} and {1} at current resolution'
-                  .format(overlap_map1, overlap_map2))
-            print('Fraction of model overallping with map: {0} and {1} at current resolution'
-                  .format(overlap_model1, overlap_model2))
+            print('TEMPys scores :')
+            print('Fraction of map overlapping with model: {0:.3f} and {1:.3f} at \
+                   current resolution'.format(ovl_map1, ovl_map2))
+            print('Fraction of model overlapping with map: {0:.3f} and {1:.3f} at \
+                   current resolution'.format(ovl_mdl1, ovl_mdl2))
 
             # make xmap
             apix = map_curreso.apix
@@ -290,19 +294,12 @@ if ippdb is not None:
 
             if verbose >= 1:
                 start = timer()
-            dmap = DFM.get_diffmap12(lowpass_map, lowpass_cmap, rcyc, rcyc)
+            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
             if verbose >= 1:
                 end = timer()
                 print('Diff map calc: {0} s '.format(end-start))
-            #os.popen('difference map')
-
-            # xyz shiftfield refine pass in cmap, dmap, mmap, radcyc, radial_filter/hannwindow
-            #window_size = int(math.floor((radcyc*2)/apix))
-            #if not window_size % 2:  # make window size odd int for the center
-            #    window_size = window_size + 1
-            #print(window_size)
-            #fltr_win = sf_util.filter_winsize_1Dto3D(signal.windows.hann(window_size))
-            #print(np.amax(fltr_win))
+            # xyz shiftfield refine pass in cmap, dmap, mmap, x1map, x2map,
+            # x3map, radcyc, fltr, fftobj, iffobj
             print("REFINE XYZ")
             '''
             cmap.write_to_MRC_file('cmap.map')
@@ -314,132 +311,128 @@ if ippdb is not None:
             newdmap.write_to_MRC_file('newdmap.map')
             mmap.write_to_MRC_file('mmap.map')
             '''
-            x1map = Map(np.zeros(lowpass_cmap.fullMap.shape),
-                        lowpass_cmap.origin,
-                        lowpass_cmap.apix,
+            x1map = Map(np.zeros(lp_cmap.fullMap.shape),
+                        lp_cmap.origin,
+                        lp_cmap.apix,
                         'mapname',)
-            x2map = Map(np.zeros(lowpass_cmap.fullMap.shape),
-                        lowpass_cmap.origin,
-                        lowpass_cmap.apix,
+            x2map = Map(np.zeros(lp_cmap.fullMap.shape),
+                        lp_cmap.origin,
+                        lp_cmap.apix,
                         'mapname',)
-            x3map = Map(np.zeros(lowpass_cmap.fullMap.shape),
-                        lowpass_cmap.origin,
-                        lowpass_cmap.apix,
+            x3map = Map(np.zeros(lp_cmap.fullMap.shape),
+                        lp_cmap.origin,
+                        lp_cmap.apix,
                         'mapname',)
             if refxyz:
-                x1map, x2map, x3map = shiftfield.shift_field_coord(lowpass_cmap, dmap, mmap, x1map, x2map, x3map, radcyc, fltr, fft_obj, ifft_obj)
+                x1map, x2map, x3map = shiftfield.shift_field_coord(lp_cmap,
+                                                                   dmap, mmap,
+                                                                   x1map,
+                                                                   x2map,
+                                                                   x3map,
+                                                                   radcyc,
+                                                                   fltr,
+                                                                   fft_obj,
+                                                                   ifft_obj)
 
-                # read pdb and update
-                # need to use fractional coordinates for updating the derivatives
-                # rbf can be used just need to crop down to atm point in map 64 points around (4,4,4) similar to clipper
-                #rbf_x, rbf_y, rbf_z = np.mgrid[0:newMap.x_size(), 0:newMap.y_size(), 0:newMap.z_size()]
-                #rbf_y = np.mgrid[0:newMap.y_size()]
-                #rbf_z = np.mgrid[0:newMap.z_size()]
-
-                #rbf_x1 = Rbf(rbf_z, rbf_y, rbf_x, x1map.fullMap, function='cubic', mode='3-D')
-                #rbf_x2 = Rbf(rbf_z, rbf_y, rbf_x, x2map.fullMap, function='cubic', mode='3-D')
-                #rbf_x3 = Rbf(rbf_z, rbf_y, rbf_x, x3map.fullMap, function='cubic', mode='3-D')
+                # Read pdb and update
+                # need to use fractional coordinates for updating
+                # the derivatives.
+                # rbf can be used just need to crop down to atm point
+                # in map 64 points around (4,4,4) similar to clipper
                 count = 0
-                
                 for atm in structure_instance.atomList:
-                    #c_atm = atm.get_pos_vector()
-                    
                     # transform back to orth_coord after getting du, dv, dw
                     # use scipy griddate gd((x,y,z), v, (X,Y,Z), method='cubic')
-                    # map array in fullMap is in Z,Y,X so the point to interpolate should by z,y,x instead of x,y,z
+                    # map array in fullMap is in Z,Y,X so the point to
+                    # interpolate should by z,y,x instead of x,y,z
                     # get mapgridpos of atom
                     try:
-                        ax, ay, az, amass = SB.mapGridPosition(map_curreso, atm)
+                        ax, ay, az, am = SB.mapGridPosition(map_curreso, atm)
                     except TypeError:
                         print(atm.write_to_PDB())
                         exit()
-                    xyz0, nb_xyz = sf_util.get_lowerbound_posinnewbox(ax, ay, az)
-                    start = timer()
-                    local_x1map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1], xyz0[2], x1map)
-                    end = timer()
-                    if count == 0:
-                        print('time : {0}'.format(end-start))
-                    start = timer()
-                    local_x2map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1], xyz0[2], x2map)
-                    end = timer()
-                    if count == 0:
-                        print('time : {0}'.format(end-start))
-                    start = timer()
-                    local_x3map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1], xyz0[2], x3map)
-                    end = timer()
-                    if count == 0:
-                        print('time : {0}'.format(end-start))
-                    
+                    xyz0, nb_xyz = sf_util.get_lowerbound_posinnewbox(ax, ay,
+                                                                      az)
+                    if verbose >= 1:
+                        start = timer()
+                    local_x1map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1],
+                                                              xyz0[2], x1map)
+                    local_x2map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1],
+                                                              xyz0[2], x2map)
+                    local_x3map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1],
+                                                              xyz0[2], x3map)
+                    if verbose >= 1:
+                        end = timer()
+                        if count == 0:
+                            print('Crop map : {0}'.format(end-start))
+                        
                     zg, yg, xg = np.mgrid[0:local_x1map.z_size(),
-                                        0:local_x1map.y_size(),
-                                        0:local_x1map.x_size()]
-
+                                          0:local_x1map.y_size(),
+                                          0:local_x1map.x_size()]
                     rbf_x = xg.ravel()
                     rbf_y = yg.ravel()
                     rbf_z = zg.ravel()
-                    start  = timer()
-                    rbf_x1 = Rbf(rbf_z, rbf_y, rbf_x, local_x1map.fullMap, function='cubic', mode='3-D')
-                    end = timer()
-                    if count == 0:
-                        print('time : {0}'.format(end-start))
-                    start = timer()
-                    rbf_x2 = Rbf(rbf_z, rbf_y, rbf_x, local_x2map.fullMap, function='cubic', mode='3-D')
-                    end = timer()
-                    if count == 0:
-                        print('time : {0}'.format(end-start))
-                    start = timer()
-                    rbf_x3 = Rbf(rbf_z, rbf_y, rbf_x, local_x3map.fullMap, function='cubic', mode='3-D')
-                    end = timer()
-                    if count == 0:
-                        print('time : {0}'.format(end-start))
-                    
-                    #rbf_x1 = Rbf(zg, yg, xg, local_x1map.fullMap, function='cubic', mode='3-D')
-                    #rbf_x2 = Rbf(zg, yg, xg, local_x2map.fullMap, function='cubic', mode='3-D')
-                    #rbf_x3 = Rbf(zg, yg, xg, local_x3map.fullMap, function='cubic', mode='3-D')
-
-
+                    if verbose >= 1:
+                        start = timer()
+                    rbf_x1 = Rbf(rbf_z, rbf_y, rbf_x, local_x1map.fullMap,
+                                 function='cubic', mode='3-D')
+                    rbf_x2 = Rbf(rbf_z, rbf_y, rbf_x, local_x2map.fullMap,
+                                 function='cubic', mode='3-D')
+                    rbf_x3 = Rbf(rbf_z, rbf_y, rbf_x, local_x3map.fullMap,
+                                 function='cubic', mode='3-D')
+                    if verbose >= 1:
+                        end = timer()
+                        if count == 0:
+                            print('Interpolate time : {0}'.format(end-start))
                     du = 2.0*rbf_x1(nb_xyz[2], nb_xyz[1], nb_xyz[0])
                     dv = 2.0*rbf_x2(nb_xyz[2], nb_xyz[1], nb_xyz[0])
                     dw = 2.0*rbf_x3(nb_xyz[2], nb_xyz[1], nb_xyz[0])
-                    
-                    #du = 2.0*(griddata(gridtree[1], x1map.fullMap, (c_atm.z, c_atm.y, c_atm.x), method='cubic'))
-                    #dv = 2.0*(griddata(gridtree[1], x2map.fullMap, (c_atm.z, c_atm.y, c_atm.x), method='cubic'))
-                    #dw = 2.0*(griddata(gridtree[1], x3map.fullMap, (c_atm.z, c_atm.y, c_atm.x), method='cubic'))
+                    # transform to orthogonal coordinates
                     dxyz = np.matmul(np.array([du, dv, dw]), cell.orthmat)
-                    shift_vars.append([du, dv, dw, dxyz])
+                    if verbose >= 1:
+                        shift_vars.append([du, dv, dw, dxyz])
                     atm.set_x(atm.x + dxyz[0])
                     atm.set_y(atm.y + dxyz[1])
                     atm.set_z(atm.z + dxyz[2])
-                    count +=1
-                    
+                    count += 1
+
+            # U-isotropic refinement
             if refuiso or (lastcyc and postrefuiso):
                 print('REFINE U ISO')
-                x1map = shiftfield.shift_field_uiso(lowpass_cmap, dmap, mmap, x1map, radcyc, fltr, fft_obj, ifft_obj, cell)
+                x1map = shiftfield.shift_field_uiso(lp_cmap, dmap, mmap, x1map,
+                                                    radcyc, fltr, fft_obj,
+                                                    ifft_obj, cell)
 
                 for atm in structure_instance.atomList:
                     try:
-                        ax, ay, az, amass = SB.mapGridPosition(map_curreso, atm)
+                        ax, ay, az, amass = SB.mapGridPosition(map_curreso,
+                                                               atm)
                     except TypeError:
                         print(atm.write_to_PDB())
                         exit()
-                    xyz0, nb_xyz = sf_util.get_lowerbound_posinnewbox(ax, ay, az)
-                    local_x1map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1], xyz0[2], x1map)
+                    xyz0, nb_xyz = sf_util.get_lowerbound_posinnewbox(ax, ay,
+                                                                      az)
+                    local_x1map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1],
+                                                              xyz0[2], x1map)
                     zg, yg, xg = np.mgrid[0:local_x1map.z_size(),
-                                    0:local_x1map.y_size(),
-                                    0:local_x1map.x_size()]
-
+                                          0:local_x1map.y_size(),
+                                          0:local_x1map.x_size()]
                     rbf_x = xg.ravel()
                     rbf_y = yg.ravel()
                     rbf_z = zg.ravel()
-                
+                    # Interpolation
                     rbf_x1 = Rbf(rbf_z, rbf_y, rbf_x, local_x1map.fullMap,
                                  function='cubic', mode='3-D')
                     du = 1.0*rbf_x1(nb_xyz[2], nb_xyz[1], nb_xyz[0])
-                    shift_U.append([atm.temp_fac, du, sf_util.u2b(du)])
+                    if verbose >= 1:
+                        shift_U.append([atm.temp_fac, du, sf_util.u2b(du)])
+                    
+                    du = uhi if du > uhi else ulo if du < ulo else du
                     atm.temp_fac = atm.temp_fac - sf_util.u2b(du)
                     
             temp_result = sf_util.results_by_cycle(cycrr, cyc, rcyc, radcyc,
-                                                   overlap_model1, overlap_model2, 0.0)
+                                                   ovl_map1, ovl_map2,
+                                                   ovl_mdl1, ovl_mdl2, 0.0)
             '''
             temp_result = results_by_cycle()
             temp_result.cycle = cyc
@@ -451,39 +444,47 @@ if ippdb is not None:
             temp_result.fscavg = 0.0
             '''
             results.append(temp_result)
-
-            outname = 'testout_sheetbend1_withorthmat_{0}.pdb'.format(cyc+1)
-            structure_instance.write_to_PDB(outname, hetatom=hetatom)
+            if output_intermediate:
+                outname = '{0}_{1}.pdb'.format(oppdb.strip('.pdb'), cyc+1)
+                structure_instance.write_to_PDB(outname, hetatom=hetatom)
             if len(shift_vars) != 0:
                 outcsv = 'shiftvars1_withorthmat_{0}.csv'.format(cyc+1)
                 fopen = open(outcsv, 'w')
-                for j in range(0,len(shift_vars)):
+                for j in range(0, len(shift_vars)):
                     fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
-                    #fuiso.write('{0}, {1}\n'.format(j, shift_U[j]))
-
                 fopen.close()
             if len(shift_U) != 0:
                 outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
                 fuiso = open(outusiocsv, 'w')
-                for j in range(0,len(shift_U)):
+                for j in range(0, len(shift_U)):
                     fuiso.write('{0}, {1}\n'.format(j, shift_U[j]))
                 fuiso.close()
-            #exit()
             # end of cycle loop
         if pseudoreg:
             print('PSEUDOREGULARIZE')
             start = timer()
             structure_instance = preg.regularize_frag(structure_instance)
             end = timer()
+            cmap = emc.calc_map_density(mapin, structure_instance)
+            cmap_t = 1.5*cmap.std()
+            ovl_mapf, ovl_mdlf = scorer.calculate_overlap_scores(mapin, cmap,
+                                                                 mapin_t,
+                                                                 cmap_t)
+            print('TEMPys scores :')
+            print('Fraction of map overlapping with model: {0:.3f}'
+                  .format(ovl_mapf))
+            print('Fraction of model overlapping with map: {0:.3f}'
+                  .format(ovl_mdlf))
             print('time : ', end-start)
-            
-        #end of psedo reg loop
 
-# write pdb
-structure_instance.write_to_PDB('testout_sheetbend1_withorthmat_final.pdb', hetatom=hetatom)
+        # end of psedo reg loop
+
+# write final pdb
+structure_instance.write_to_PDB('{0}_final.pdb'.format(oppdb.strip('.pdb')),
+                                hetatom=hetatom)
 
 # write xml results
-f = open("results.xml", "w")
+f = open(xmlout, 'w')
 for i in range(0, len(results)):
     if i == 0:
         results[i].write_xml_results_start(f)
@@ -494,4 +495,3 @@ for i in range(0, len(results)):
 f.close()
 
 # need to use ccpem python tempy for the diff map
-

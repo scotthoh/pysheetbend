@@ -78,6 +78,15 @@ class sheetbendParser(object):
             required=False
         )
 
+        outfiles.add_argument(
+            '-intermediate',
+            '--intermediate',
+            help='Output model files every cycle.',
+            action='store_true',
+            dest='intermediate',
+            required=False,
+        )
+
         res = parser.add_argument_group('Refinement Parameters')
         res.add_argument(
             '-r',

@@ -450,9 +450,11 @@ class radial_fltr:
         self.fltr_data_r = np.zeros(self.gridshape.grid_sam, dtype='float64')
         f000 = 0.0
         # z,y,x convention
-        origin = np.array([densmap.origin[2], densmap.origin[1], densmap.origin[0]])
+        origin = np.array([densmap.origin[2], densmap.origin[1],
+                          densmap.origin[0]])
         if isinstance(densmap.apix, tuple):
-            apix = np.array([densmap.apix[2], densmap.apix[1], densmap.apix[0]])
+            apix = np.array([densmap.apix[2], densmap.apix[1],
+                            densmap.apix[0]])
         else:    
             apix = np.array([densmap.apix, densmap.apix, densmap.apix])
 
@@ -494,9 +496,8 @@ class radial_fltr:
         #    print(pos[i], c1[i], gt[1][i], r[i])
         if self.verbose >= 1:
             start = timer()
-        print('self.rad ', self.rad)
+            print('self.rad ', self.rad)
         r_ind = np.nonzero(r < self.rad)
-        print(r_ind)
         #r = np.where(r < self.rad, self.fltr(r), 0.0)
         #r_ind = np.nonzero(r)
         if self.verbose >= 1:
@@ -538,7 +539,8 @@ class radial_fltr:
         '''
         # calc scale factor
         self.scale = 1.0/f000
-        print('scale, ', self.scale, ' f000, ', f000)
+        if self.verbose >= 1:
+            print('scale, ', self.scale, ' f000, ', f000)
 
     def cor_mod1(self, a, b):
         """
@@ -637,21 +639,26 @@ class results_by_cycle:
     Dataclass to stor results for each cycle.
     '''
     def __init__(self, cyclerr, cycle, resolution, radius,
-                 envscore, envscore_reso, fscavg):
+                 mapmdlfrac, mapmdlfrac_reso,
+                 mdlmapfrac, mdlmapfrac_reso, fscavg):
         self.cyclerr = cyclerr
         self.cycle = cycle
         self.resolution = resolution
         self.radius = radius
-        self.envscore = envscore
-        self.envscore_reso = envscore_reso
+        self.mapmdlfrac = mapmdlfrac
+        self.mapmdlfrac_reso = mapmdlfrac_reso
+        self.mdlmapfrac = mdlmapfrac
+        self.mdlmapfrac_reso = mdlmapfrac_reso
         self.fscavg = fscavg
     '''
     cyclerr: int
     cycle: int
     resolution: float
     radius: float
-    envscore: float
-    envscore_reso: float
+    mapmdlfrac: float
+    mapmdlfrac_reso: float
+    mdlmapfrac: float
+    mdlmapfrac_reso: float
     fscavg: float
     '''
     def write_xml_results_start(self, f):
@@ -662,21 +669,33 @@ class results_by_cycle:
     def write_xml_results_end(self, f):
         f.write(' </Cycles>\n')
         f.write(' <Final>\n')
-        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'.format(self.cyclerr+1))
+        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'
+                .format(self.cyclerr+1))
         f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
         f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
         f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
-        f.write('   <EnvelopeScore>{0}</EnvelopeScore>\n'.format(self.envscore))
-        f.write('   <EnvelopeScoreAtResolution>{0}</EnvelopeScoreAtResolution>\n'.format(self.envscore_reso))
+        f.write('   <OverlapMap>{0}</OverlapMap>\n'.format(self.mapmdlfrac))
+        f.write('   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n'
+                .format(self.mapmdlfrac_reso))
+        f.write('   <OverlapModel>{0}</OverlapModel>\n'
+                .format(self.mdlmapfrac))
+        f.write('   <OverlapModelAtResolution>{0}</OverlapModekAtResolution>\n'
+                .format(self.mdlmapfrac_reso))
         f.write(' </Final>\n')
         f.write('</SheetbendResult\n')
-    
+
     def write_xml_results_cyc(self, f):
         f.write('  <Cycle>\n')
-        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'.format(self.cyclerr+1))
+        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'
+                .format(self.cyclerr+1))
         f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
         f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
         f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
-        f.write('   <EnvelopeScore>{0}</EnvelopeScore>\n'.format(self.envscore))
-        f.write('   <EnvelopeScoreAtResolution>{0}</EnvelopeScoreAtResolution>\n'.format(self.envscore_reso))
+        f.write('   <OverlapMap>{0}</OverlapMap>\n'.format(self.mapmdlfrac))
+        f.write('   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n'
+                .format(self.mapmdlfrac_reso))
+        f.write('   <OverlapModel>{0}</OverlapModel>\n'
+                .format(self.mdlmapfrac))
+        f.write('   <OverlapModelAtResolution>{0}</OverlapModekAtResolution>\n'
+                .format(self.mdlmapfrac_reso))
         f.write('  </Cycle>\n')
