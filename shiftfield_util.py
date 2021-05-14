@@ -4,6 +4,9 @@
 import math
 import numpy as np
 from timeit import default_timer as timer
+from collections import OrderedDict
+#from time import perf_counter
+
 '''from TEMPy.math.vector import Vector
 from TEMPy.maps.map_parser import MapParser as mp
 from TEMPy.protein.structure_blurrer import StructureBlurrer
@@ -55,6 +58,7 @@ def mapGridPositions_radius(densMap, atom, gridtree, radius):
         print('Warning, atom out of map box')
         return []
 
+
 def make_atom_overlay_map1_rad(densMap, prot, gridtree, rad):
     """
     Returns a Map instance with atom locations recorded on
@@ -76,7 +80,7 @@ def make_atom_overlay_map1_rad(densMap, prot, gridtree, rad):
     return densMap
 
 
-class grid_dim:
+class GridDimension:
     """
     Grid dimensions object
     """
@@ -405,7 +409,7 @@ def maptree_zyx(densmap):
     return gridtree, indi
 
 
-class radial_fltr:
+class RadialFilter:
     """
     Radial filter object
     """
@@ -435,7 +439,7 @@ class radial_fltr:
         self.nrad = 1000
         self.drad = 0.25
         self.sum_r = [0.0]*self.nrad
-        self.gridshape = grid_dim(densmap)
+        self.gridshape = GridDimension(densmap)
 
         for i in range(0, self.nrad):
             r = self.drad * (float(i) + 0.5)
@@ -634,7 +638,7 @@ class radial_fltr:
 
 
 # @dataclass #from dataclasses import dataclass
-class results_by_cycle:
+class ResultsByCycle:
     '''
     Dataclass to stor results for each cycle.
     '''
@@ -699,3 +703,32 @@ class results_by_cycle:
         f.write('   <OverlapModelAtResolution>{0}</OverlapModekAtResolution>\n'
                 .format(self.mdlmapfrac_reso))
         f.write('  </Cycle>\n')
+
+
+class Profile:
+    '''
+    Profiling class to measure elapsed time
+    '''
+    def __init__(self):
+        self.prof = OrderedDict()
+        self.start_T = 0.0
+        self.end_T = 0.0
+        self.id = None
+
+    def start(self, id):
+        self.id = id
+        self.start_T = timer()
+
+    def end(self, id):
+        self.end_T = timer()
+        prof_time = self.end_T - self.start_T
+        if id in self.prof:
+            self.prof[id] += prof_time
+        else:
+            self.prof[id] = prof_time
+
+    def profile_log(self):
+        if self.prof:
+            for k, v in self.prof.items():
+                print('{0} : {1:.6f} s'.format(k, v))
+

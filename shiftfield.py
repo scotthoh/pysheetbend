@@ -40,7 +40,6 @@ def shift_field_coord(cmap, dmap, mask, x1map, x2map, x3map, rad, fltr,
     if verbose >= 1:
         start = timer()
     xdata_c = fft_obj(data_r)
-    # xdata_c[:, :, :] = (xdata_c[:, :, :]).conjugate()
     xdata_c = xdata_c.conjugate().copy()
     if verbose >= 1:
         end = timer()
@@ -138,7 +137,7 @@ def shift_field_coord(cmap, dmap, mask, x1map, x2map, x3map, rad, fltr,
     x33map1.write_to_MRC_file('x33_map1.map')
 
     dmap.set_apix_tempy()
-    mf = sf_util.radial_fltr(rad, fltr, dmap)
+    mf = sf_util.RadialFilter(rad, fltr, dmap)
     # dmap_gt = SB.maptree(dmap)
     y1map = mf.mapfilter(y1map, fft_obj, ifft_obj)
     y2map = mf.mapfilter(y2map, fft_obj, ifft_obj)
@@ -302,7 +301,7 @@ def shift_field_uiso(cmap, dmap, mask, x1map, rad, fltr, fft_obj,
 
     # filter maps
     dmap.set_apix_tempy()
-    mf = sf_util.radial_fltr(rad, fltr, dmap)
+    mf = sf_util.RadialFilter(rad, fltr, dmap)
     y1map = mf.mapfilter(y1map, fft_obj, ifft_obj)
     x11map = mf.mapfilter(x11map, fft_obj, ifft_obj)
 
