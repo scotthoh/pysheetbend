@@ -13,9 +13,15 @@ from TEMPy.map_process.process import MapEdit
 
 '''
 # TEMPy code from CCPEM
+from numpy.core.fromnumeric import mean
 from TEMPy.StructureBlurrer import StructureBlurrer
 from TEMPy.EMMap import Map
-from numpy import array, asarray, zeros, pi, exp, round as npround, sum as npsum, square as npsq
+
+from numpy import (
+       array, asarray, zeros, pi, exp, ceil,
+       ascontiguousarray, mgrid,
+       round as npround, sum as npsum, square as npsq,
+)
 import sys
 if sys.version_info[0] > 2:
     from builtins import isinstance
@@ -247,18 +253,23 @@ def mapGridPositions_radius(densMap, atom, gridtree, radius):
     gt = gridtree[0]
     origin = densMap.origin
     apix = densMap.apix
-    x_pos = int(round((atom.x - origin[0]) / apix, 0))
-    y_pos = int(round((atom.y - origin[1]) / apix, 0))
-    z_pos = int(round((atom.z - origin[2]) / apix, 0))
+    midapix = apix/2.0
+    #x_pos = int(npround((atom.x - midapix - origin[0]) / apix, 0))
+    #y_pos = int(npround((atom.y - midapix - origin[1]) / apix, 0))
+    #z_pos = int(npround((atom.z - midapix - origin[2]) / apix, 0))
+    x_pos = int(npround((atom.x - origin[0]) / apix, 0))
+    y_pos = int(npround((atom.y - origin[1]) / apix, 0))
+    z_pos = int(npround((atom.z - origin[2]) / apix, 0))
+    
     if((densMap.x_size() >= x_pos >= 0) and (densMap.y_size() >= y_pos >= 0)
         and (densMap.z_size() >= z_pos >= 0)):
         # search all points within radius of atom
         list_points = gt.query_ball_point([atom.x, atom.y, atom.z],
                                             radius)
-        pos_array = []
-        for pt in list_points:
-            pos_array.append(gridtree[1][pt])
-        return asarray(pos_array)
+        pos_array = [gridtree[1][pt] for pt in list_points]
+        # for pt in list_points:
+        #    pos_array.append(gridtree[1][pt])
+        return ascontiguousarray(pos_array)
         # return list_points  # ,(x_pos, y_pos, z_pos)
     else:
         print('Warning, atom out of map box')
@@ -276,7 +287,7 @@ def u2b(u_iso):
     return u_iso * eightpi2()
 
 
-def mapgridpos_to_coord_arr(pos, densMap, ccpem_tempy=False):
+def coord_to_mapgridindex_arr(pos, densMap, ccpem_tempy=False):
     """
     Returns the array of 3D coordinates of the map grid position given
 
@@ -292,10 +303,11 @@ def mapgridpos_to_coord_arr(pos, densMap, ccpem_tempy=False):
         apix = array([densMap.apix[0], densMap.apix[1], densMap.apix[2]])
     else:
         apix = array([densMap.apix, densMap.apix, densMap.apix])
-    midapix = apix/2.0
+    #midapix = apix/2.0
     # xyz_arr = pos * apix + origin
     # map coord to grid x,y,z index
-    xyz_arr = npround(((pos - midapix) - origin)/apix, 0)  # int
+    #xyz_arr = ascontiguousarray(npround(((pos - midapix) - origin)/apix, 0))  # int)
+    xyz_arr = ascontiguousarray(npround((pos - origin)/apix, 0))  # int)
 
     return xyz_arr.astype(int)
 
@@ -351,13 +363,13 @@ class AtomShapeFn:
 
         self.is_iso = is_iso
         try:
-            self.elem = atom.elem
+            self.elem = atom.elem.capitalize()
         except ValueError:
             self.elem = ''
+            print(atom.write_to_pdb())
         self.res_no = atom.res_no
 
-        atype = ""
-        nalpha = 0
+        '''
         for a in self.elem:
             if a.isalpha():
                 nalpha += 1
@@ -368,6 +380,7 @@ class AtomShapeFn:
             elif not self.elem.isspace():
                 atype += a
         self.elem = atype
+        '''
         # calculate coefficients
         self.a = [float('nan')] * 5
         self.b = [float('nan')] * 5
@@ -433,6 +446,125 @@ class AtomShapeFn:
             array of coordinates with shape (n,3)
             e.g. [[x1,y1,z1],[x2,y2,z2],...,[xn,yn,zn]]
         """
+        #midapix = apix/2.0
+        #dxyz = pos - midapix - self.xyz
+        dxyz = pos - self.xyz
+        # needs to subtract half pixel size to correct the mapgrid position
+        # when ccpem tempy is used
+        # dxyz = (pos - apix/2.0) - self.xyz
+        rsq = npsum(npsq(dxyz), axis=1)
+
+        rho_array = self.occ * (self.aw[0]*exp(self.bw[0]*rsq) +
+                                self.aw[1]*exp(self.bw[1]*rsq) +
+                                self.aw[2]*exp(self.bw[2]*rsq) +
+                                self.aw[3]*exp(self.bw[3]*rsq) +
+                                self.aw[4]*exp(self.bw[4]*rsq))
+
+        return ascontiguousarray(rho_array)
+
+'''
+class AtomShapeFn1:
+    """
+    Atom shape function class adapted from clipper::AtomShapeFn class.
+    The atomic scattering factor is instantiated for each atom in turn,
+    giving the parameters: position, element, occupancy and the
+    isotropic or anisotropic U-value. The methods in the class is then
+    called to return calculated density in real space.
+    """
+
+    def __init__(self, atomList, is_iso):
+        """
+        The atom is initialised.
+        Arguments:
+        *atom*
+            BioPyAtom object from TEMPy
+        *is_iso*
+            True to initialise atom as isotropic
+            False to initialise atom as anisotropic
+        """
+        #if atom == []:  # if not atom
+        #    return
+        self.occ = atomList[:].occ
+        self.x = atomList[:].x
+        self.y = atomList[:].y
+        self.z = atomList[:].z
+        self.xyz = atomList[:].get_pos_mass()[:3]
+        self.temp_fac = atomList[:].temp_fac
+
+        self.is_iso = is_iso
+        #try:
+        self.elem = atomList[:].elem.capitalize()
+        #except ValueError:
+        #    self.elem = ''
+        #    print(atom.write_to_pdb())
+        self.res_no = atomList[:].res_no
+
+        # calculate coefficients
+        self.a = [[float('nan')] * 5] * len(atomList)
+        self.b = [[float('nan')] * 5] * len(atomList)
+        self.aw = [[float('nan')] * 5] * len(atomList)
+        self.bw = [[float('nan')] * 5] * len(atomList)
+        self.calc_coeff()
+
+    def calc_coeff(self):
+        """
+        Calculate and store coefficients for initialised atom
+        """
+        # store coeffs and derived info
+        elec_SF = 
+        for i in range(5):
+            self.a[:][i] = ElecSF[self.elem][0][i]
+            self.b[i] = ElecSF[self.elem][1][i]
+            self.bw[i] = (-4.0*pi*pi) / (self.b[i] + self.temp_fac)
+            self.aw[i] = self.a[i] * pow(-self.bw[i]/pi, 1.5)
+
+    def print_coeff(self):
+        """
+        Print out coefficients
+        """
+        print('a, b:-')
+        for i in range(5):
+            print(self.a[i], self.b[i])
+        print('####\naw, bw:-')
+        for i in range(5):
+            print(self.aw[i], self.bw[i])
+
+    def rho(self, pos, apix):
+        """
+        Returns the electron density at given coordinates
+        Re-coded from clipper atomsf.cpp
+        Argument:
+        *pos*
+            (x,y,z) coordinates
+        *apix*
+            pixel size
+        """
+        dx = pos[0] - self.x
+        dy = pos[1] - self.y
+        dz = pos[2] - self.z
+        # needs to subtract half pixel size to correct the mapgrid position
+        # when ccpem tempy is used
+        # dx = pos[0] - apix/2.0 - self.x
+        # dy = pos[1] - apix/2.0 - self.y
+        # dz = pos[2] - apix/2.0 - self.z
+        rsq = dx*dx + dy*dy + dz*dz
+
+        return (self.occ * (self.aw[0]*exp(self.bw[0]*rsq) +
+                self.aw[1]*exp(self.bw[1]*rsq) +
+                self.aw[2]*exp(self.bw[2]*rsq) +
+                self.aw[3]*exp(self.bw[3]*rsq) +
+                self.aw[4]*exp(self.bw[4]*rsq)))
+
+    def rho_arr(self, pos, apix):
+        """
+        Returns the array of electron density for the
+        given array of coordinates.
+        Re-coded from clipper atomsf.cpp
+        Argument:
+        *pos*
+            array of coordinates with shape (n,3)
+            e.g. [[x1,y1,z1],[x2,y2,z2],...,[xn,yn,zn]]
+        """
         midapix = apix/2.0
         dxyz = (pos - midapix) - self.xyz
         # needs to subtract half pixel size to correct the mapgrid position
@@ -446,7 +578,29 @@ class AtomShapeFn:
                                 self.aw[3]*exp(self.bw[3]*rsq) +
                                 self.aw[4]*exp(self.bw[4]*rsq))
 
-        return rho_array
+        return rho_array'''
+
+
+def gridpts_around_atom(atom, radius, densMap):
+    x, y, z = atom.map_grid_position(densMap)[:3]
+    #print(x-radius, y-radius, z-radius, x+radius, y+radius, z+radius)
+    minx, miny, minz = ceil(x-radius), ceil(y-radius), ceil(z-radius)
+    maxx, maxy, maxz = ceil(x+radius), ceil(y+radius), ceil(z+radius)
+    #print(minx, miny, minz, maxx, maxy, maxz)
+    minx, miny, minz = max(minx, 0), max(miny, 0), max(minz, 0)
+    maxx = min(maxx, densMap.x_size())
+    maxy = min(maxy, densMap.y_size())
+    maxz = min(maxz, densMap.z_size())
+    #print(minx, miny, minz, maxx, maxy, maxz)
+    apix, origin = densMap.apix, densMap.origin
+
+    xg, yg, zg = mgrid[minx:maxx, miny:maxy, minz:maxz]
+    xg = xg * apix + origin[0]
+    yg = yg * apix + origin[1]
+    zg = zg * apix + origin[2]
+    indi = zip(xg.ravel(), yg.ravel(), zg.ravel())
+
+    return ascontiguousarray(indi)
 
 
 def calc_map_density(mapin, structure_instance, verbose=0):
@@ -459,9 +613,11 @@ def calc_map_density(mapin, structure_instance, verbose=0):
     *structure_instance*
         structure instance of the model
     """
+    from shiftfield_util import Profile
     # create new map initialised with 0 density value
     # based on input map's origin and grid spacing.
     # calculate new grid spacing and update
+    #timelog = Profile()
     apix = mapin.apix
     if verbose >= 1:
         print("Start of map density calculation.")
@@ -484,24 +640,49 @@ def calc_map_density(mapin, structure_instance, verbose=0):
     count = 0  # for checking total no. of atoms
     print('Total number of atoms in model : {0}'
           .format(len(structure_instance.atomList)))
-    atomList = structure_instance.atomList
+    # atomList = structure_instance.atomList
     # get KDTree of coordinates
+    #print('blurer')
     gridtree = blurrer.maptree(newMap)
-
-    for atm in atomList:
+    #print('blurer end')
+    l = []
+    
+    for atm in structure_instance.atomList:
         if verbose > 6:
             print(atm.write_to_PDB())
+        print(atm.fullid)
         # initialise atom for density calculation
+        #timelog.start('initAtmSF')
         sf = AtomShapeFn(atm, is_iso=True)
         # get list of nearest points of an atom
         pos = mapGridPositions_radius(newMap, atm, gridtree, 2.5)
-        coord_pos = mapgridpos_to_coord_arr(pos, newMap, False)
+        #timelog.end('initAtmSF')
+        #timelog.start('gridpts_around_atom')
+        #pos = gridpts_around_atom(atm, 2.5, newMap)
+        #timelog.end('gridpts_around_atom')
+        l.append(len(pos))
+        # convert the real coord to map grid index
+        
+        #timelog.start('CoordToInd')
+        pos_ind = coord_to_mapgridindex_arr(pos, newMap, False)
+        #timelog.end('CoordToInd')
+        xi, yi, zi = zip(*pos_ind)
+        #timelog.start('RhoArr')
         rho_array = sf.rho_arr(pos, newMap.apix)  # coord_pos)
-        for i in range(len(pos)):
-            newMap.fullMap[coord_pos[i][2],
-                           coord_pos[i][1],
-                           coord_pos[i][0]] += rho_array[i]
+        #timelog.end('RhoArr')
+        #timelog.start('Assign')
+        newMap.fullMap[zi, yi, xi] += rho_array
+        
+        #for i in range(len(pos_ind)):
+        #    print(pos[i], pos_ind[i], rho_array[i])
+        
+        #timelog.end('Assign')
+        #for i in range(len(pos)):
+        #    newMap.fullMap[coord_pos[i][2],
+        #                   coord_pos[i][1],
+        #                   coord_pos[i][0]] += rho_array[i]
         count += 1
+
     if verbose >= 1:
         print('After calculate ED for {0} atoms'.format(count))
     # resample to fit the input map
@@ -509,6 +690,10 @@ def calc_map_density(mapin, structure_instance, verbose=0):
     newMap.update_header()
     if verbose >= 1:
         print('End of map density calculation.')
+    print('Max length of points : {0}'.format(max(l)))
+    print('Min length of points : {0}'.format(min(l)))
+    print('Mean length of points : {0}'.format(mean(l)))
+    #timelog.profile_log()
     # return map instance
     return newMap
 
@@ -522,6 +707,8 @@ if __name__ == '__main__':
 
     mapin = mp.readMRC('/home/swh514/Projects/data/EMD-3488/map/emd_3488.map')
     filename = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent'
+    #mapin = mp.readMRC('/home/swh514/Projects/data/EMD-10530/map/emd_10530.map')
+    #filename = '/home/swh514/Projects/data/EMD-10530/fittedModels/PDB/6tmx.ent'
     strucID = filename.split('/')[-1].replace('.pdb', '').replace('.ent', '')
     structure_instance = PDBParser.read_PDB_file(strucID, filename,
                                                     hetatm=True)
@@ -532,5 +719,5 @@ if __name__ == '__main__':
     calcDensMap = calc_map_density(mapin, structure_instance, verbose=1)
     end = timer()
     print('Timer : {0}'.format(end-start))
-    calcDensMap.write_to_MRC_file('test{0}_calc_density_map_out_4.map'
+    calcDensMap.write_to_MRC_file('test{0}_calc_density_map_out_9maptree.map'
                                     .format(strucID))

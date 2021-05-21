@@ -137,6 +137,7 @@ def shift_field_coord(cmap, dmap, mask, x1map, x2map, x3map, rad, fltr,
     x33map1.write_to_MRC_file('x33_map1.map')
 
     dmap.set_apix_tempy()
+    start = timer()
     mf = sf_util.RadialFilter(rad, fltr, dmap)
     # dmap_gt = SB.maptree(dmap)
     y1map = mf.mapfilter(y1map, fft_obj, ifft_obj)
@@ -148,9 +149,12 @@ def shift_field_coord(cmap, dmap, mask, x1map, x2map, x3map, rad, fltr,
     x22map = mf.mapfilter(x22map, fft_obj, ifft_obj)
     x23map = mf.mapfilter(x23map, fft_obj, ifft_obj)
     x33map = mf.mapfilter(x33map, fft_obj, ifft_obj)
-    x33map1.fullMap = x33map
-    x33map1.update_header()
-    x33map1.write_to_MRC_file('x33_map_filtered.map')
+    end = timer()
+    print('Filter maps : {0} s'.format(end-start))
+    
+    #x33map1.fullMap = x33map
+    #x33map1.update_header()
+    #x33map1.write_to_MRC_file('x33_map_filtered.map')
     # calculate U shifts
     count = 0
     start = timer()

@@ -355,7 +355,7 @@ def crop_mapgrid_points(x0, y0, z0, densmap, k=4):
     return boxmap  # cropped map, atm pos in cropped map
 
 
-def get_lowerbound_posinnewbox(x, y, z):
+def get_lowerbound_posinnewbox(xg, yg, zg):
     """
     Return lowerbound of the index, and index in new box
     Argument
@@ -366,12 +366,13 @@ def get_lowerbound_posinnewbox(x, y, z):
     *z*
       Index in z direction
     """
-    x0 = x - 1
-    y0 = y - 1
-    z0 = z - 1
-    nbx = x - x0
-    nby = y - y0
-    nbz = z - z0
+    
+    x0 = int(xg - 1)
+    y0 = int(yg - 1)
+    z0 = int(zg - 1)
+    nbx = xg - x0
+    nby = yg - y0
+    nbz = zg - z0
 
     return [x0, y0, z0], [nbx, nby, nbz]
 

@@ -23,7 +23,7 @@ from timeit import default_timer as timer
 import esf_map_calc as emc
 import shiftfield as shiftfield
 import shiftfield_util as sf_util
-from scipy.interpolate import Rbf
+from scipy.interpolate import Rbf, RegularGridInterpolator
 import pseudoregularizer
 import os
 import scale_map.map_scaling as DFM
@@ -202,11 +202,16 @@ if ippdb is not None:
                 print(lp_map.apix)
                 print(map_curreso.__class__.__name__)
                 print(map_curreso.apix)
+            
             # Calculate electron density with b-factors from input model
             if verbose >= 1:
                 start = timer()
             timelog.start('MapDensity')
-            cmap = emc.calc_map_density(map_curreso, structure_instance)
+
+            cmap = map_curreso.copy()
+            cmap.fullMap = cmap.fullMap * 0
+            cmap = structure_instance.calculate_rho(2.5, mapin, cmap)
+            #cmap = emc.calc_map_density(map_curreso, structure_instance)
             fltr_cmap = Filter(cmap)
             ftfilter = array_utils.tanh_lowpass(fltr_cmap.fullMap.shape,
                                                 mapin.apix/rcyc, fall=0.5)
@@ -255,7 +260,7 @@ if ippdb is not None:
                                                                  lp_cmap,
                                                                  mapcurreso_t,
                                                                  fltrcmap_t)
-            timelog.start('Scoring')
+            timelog.end('Scoring')
             if verbose >= 1:
                 end = timer()
                 print('Score mod: {0} s'.format(end-start))
@@ -280,18 +285,18 @@ if ippdb is not None:
                                            grid_shape=map_curreso.fullMap.shape)
             newMap.update_header()
             # maskmap at current reso
-            #newMap = SB.make_atom_overlay_map1(newMap, structure_instance)
+            newMap = SB.make_atom_overlay_map1(newMap, structure_instance)
             # mmap = mask
-            newMap.fullMap[:] = 1.0
+            #newMap.fullMap[:] = 1.0
             mmap = newMap.copy()
             #mmap = sf_util.make_atom_overlay_map1_rad(newMap, structure_instance,
             #                                          gridtree, 2.5)
             #print(np.count_nonzero(mmap.fullMap==0.0))
             # difference map at current reso, mmap
             #dmap = DFM.get_diffmap12(map_curreso, cmap, rcyc, rcyc)2
-            timelog.start('DiffMap')
             if verbose >= 1:
                 start = timer()
+            timelog.start('DiffMap')
             dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
             timelog.end('DiffMap')
             if verbose >= 1:
@@ -337,6 +342,54 @@ if ippdb is not None:
                 # Read pdb and update
                 # need to use fractional coordinates for updating
                 # the derivatives.
+                # use linear interpolation instead of cubic
+                # size of x,y,z for x1map=x2map=x3map
+                timelog.start('Interpolate')
+                zg = np.linspace(0, x1map.z_size(), num=x1map.z_size(),
+                                 endpoint=False) #, 5)
+                yg = np.linspace(0, x1map.y_size(), num=x1map.y_size(),
+                                 endpoint=False) #, 5)
+                xg = np.linspace(0, x1map.x_size(), num=x1map.x_size(),
+                                 endpoint=False) #, 5)
+                interp_x1 = RegularGridInterpolator((zg, yg, xg), x1map.fullMap)
+                interp_x2 = RegularGridInterpolator((zg, yg, xg), x2map.fullMap)
+                interp_x3 = RegularGridInterpolator((zg, yg, xg), x3map.fullMap)
+
+                count = 0
+                #v = structure_instance.get_pos_mass_list()[:, :3]
+                v = structure_instance.map_grid_position_array(map_curreso, False)
+                v = np.flip(v, 1)
+                du = 2.0*interp_x1(v)
+                dv = 2.0*interp_x2(v)
+                dw = 2.0*interp_x3(v)
+                #dxyz = np.matmul(np.array([du, dv, dw]), cell.orthmat)
+
+                for i in range(len(structure_instance)):
+                    dx, dy, dz = np.matmul(np.array([du[i], dv[i], dw[i]]),
+                                cell.orthmat)
+                    #dx, dy, dz = dxyz[i]
+                    structure_instance.atomList[i].translate(dx, dy, dz)
+                '''
+                for atm in structure_instance.atomList:
+                    try:
+                        ax, ay, az = atm.map_grid_position(map_curreso, False)[:3]
+                    except TypeError:
+                        print(atm.write_to_PDB())
+                        exit()
+                    du = 2.0*interp_x1(np.array([az, ay, ax]))[0]
+                    dv = 2.0*interp_x2(np.array([az, ay, ax]))[0]
+                    dw = 2.0*interp_x3(np.array([az, ay, ax]))[0]
+                    dxyz = np.matmul(np.array([du, dv, dw]), cell.orthmat)
+                    if verbose >= 1:
+                        shift_vars.append([du, dv, dw, dxyz])
+                    atm.set_x(atm.x + dxyz[0])
+                    atm.set_y(atm.y + dxyz[1])
+                    atm.set_z(atm.z + dxyz[2])
+                    count += 1
+                '''
+                timelog.end('Interpolate')
+                '''
+
                 # rbf can be used just need to crop down to atm point
                 # in map 64 points around (4,4,4) similar to clipper
                 count = 0
@@ -349,12 +402,11 @@ if ippdb is not None:
                     # get mapgridpos of atom
                     timelog.start('CropMap')
                     try:
-                        ax, ay, az, am = SB.mapGridPosition(map_curreso, atm)
+                        ax, ay, az = atm.map_grid_position(map_curreso, False)[:3]
                     except TypeError:
                         print(atm.write_to_PDB())
                         exit()
-                    xyz0, nb_xyz = sf_util.get_lowerbound_posinnewbox(ax, ay,
-                                                                      az)
+                    xyz0, nb_xyz = sf_util.get_lowerbound_posinnewbox(ax, ay, az)
                     if verbose >= 1:
                         start = timer()
                     local_x1map = sf_util.crop_mapgrid_points(xyz0[0], xyz0[1],
@@ -403,7 +455,7 @@ if ippdb is not None:
                     atm.set_y(atm.y + dxyz[1])
                     atm.set_z(atm.z + dxyz[2])
                     count += 1
-
+            '''
             # U-isotropic refinement
             if refuiso or (lastcyc and postrefuiso):
                 print('REFINE U ISO')
@@ -481,7 +533,10 @@ if ippdb is not None:
             timelog.end('PSEUDOREG')
             end = timer()
             timelog.start('MapDensity')
-            cmap = emc.calc_map_density(mapin, structure_instance)
+            cmap = mapin.copy()
+            cmap.fullMap = cmap.fullMap * 0
+            cmap = structure_instance.calculate_rho(2.5, mapin, cmap)
+            #cmap = emc.calc_map_density(mapin, structure_instance)
             timelog.start('MapDensity')
             timelog.start('Scoring')
             cmap_t = 1.5*cmap.std()
