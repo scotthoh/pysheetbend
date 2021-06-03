@@ -59,12 +59,12 @@ def mapGridPositions_radius(densMap, atom, gridtree, radius):
         return []
 
 
-def make_atom_overlay_map1_rad(densMap, prot, gridtree, rad):
+def make_atom_overlay_map1_rad(mapin, prot, gridtree, rad):
     """
     Returns a Map instance with atom locations recorded on
     the voxel within radius with a value of 1
     """
-    densMap = densMap.copy()
+    densMap = mapin.copy()
     densMap.fullMap = densMap.fullMap * 0.0
     # use mapgridpositions to get the points within radius. faster and efficient
     # this works. resample map before assigning density
@@ -202,7 +202,7 @@ def u2b(u_iso):
     """
     Returns the isotropic B-value
     Converts Isotropic U-value to B-value
-    Argument
+    Argument:
     *u_iso*
       isotropic U-value
     """
@@ -213,11 +213,35 @@ def b2u(b_iso):
     """
     Returns the isotropic U-value
     Converts Isotropic B-value to U-value
-    Argument
+    Argument:
     *u_iso*
       isotropic U-value
     """
     return b_iso / eightpi2()
+
+
+def limit_uiso(u_iso, ulo, uhi):
+    """
+    Checks and return u_iso values within limit
+    Arguments:
+    *u_iso*
+        array of U-isotropic values
+    *ulo*
+        lower limit of U-isotropic value
+    *uhi*
+        upper limit of U-isotropic value
+    """
+    if not len(u_iso) > 1:
+        return uhi if u_iso > uhi else ulo if u_iso < ulo else u_iso
+    else:
+        for i in range(len(u_iso)):
+            if u_iso[i] > uhi:
+                u_iso[i] = uhi
+            elif u_iso[i] < ulo:
+                u_iso[i] = ulo
+            else:
+                u_iso[i] = ulo
+        return u_iso
 
 
 class Cell:
@@ -238,40 +262,56 @@ class Cell:
         self.beta = beta
         self.gamma = gamma
 
-        if self.alpha > np.pi:
-            self.alpha = np.deg2rad(alpha)
-            print('deg2rad')
-        if self.beta > np.pi:
-            self.beta = np.deg2rad(beta)
-        if self.gamma > np.pi:
-            self.gamma = np.deg2rad(gamma)
+        if alpha == 90.0 and gamma == 90.0 and beta == 90.0:
+            self.vol = a*b*c
+            # deal with null
+            if self.vol <= 0.0:
+                raise ValueError
+            self.orthmat = np.zeros((3, 3))
+            self.orthmat[0, 0] = a
+            self.orthmat[1, 1] = b
+            self.orthmat[2, 2] = c
+            self.fracmat = np.linalg.inv(self.orthmat)
+            self.realmetric = (a*a, b*b, c*c, 0.0, 0.0, 0.0)
+            self.recimetric = (1/(a*a), 1/(b*b), 1/(c*c), 0.0, 0.0, 0.0)
+        else:
+            if self.alpha > np.pi:
+                self.alpha = np.deg2rad(alpha)
+                print('deg2rad')
+            if self.beta > np.pi:
+                self.beta = np.deg2rad(beta)
+            if self.gamma > np.pi:
+                self.gamma = np.deg2rad(gamma)
 
-        self.vol = a*b*c*np.sqrt(2.0*np.cos(alpha)*np.cos(beta)*np.cos(gamma)
-                                 - np.cos(alpha)*np.cos(alpha)
-                                 - np.cos(beta)*np.cos(beta)
-                                 - np.cos(gamma)*np.cos(gamma)+1.0)
+            self.vol = a*b*c*np.sqrt(2.0*np.cos(self.alpha)*np.cos(self.beta)
+                                     * np.cos(self.gamma)-np.cos(self.alpha)
+                                     * np.cos(self.alpha)-np.cos(self.beta)
+                                     * np.cos(self.beta)-np.cos(self.gamma)
+                                     * np.cos(self.gamma)+1.0)
+            # deal with null
+            if self.vol <= 0.0:
+                raise ValueError
 
-        # deal with null
-        if self.vol <= 0.0:
-            return
+            # orthogonalisation + fractionisation matrices
+            self.orthmat = np.identity(3)
+            self.orthmat[0, 0] = a
+            self.orthmat[0, 1] = self.orthmat[1, 0] = b*np.cos(self.gamma)  # if 90deg = 0
+            self.orthmat[0, 2] = self.orthmat[2, 0] = c*np.cos(self.beta)  # if 90deg = 0
+            self.orthmat[1, 1] = b*np.sin(self.gamma)  # if 90deg = b
+            self.orthmat[1, 2] = -c*np.sin(self.beta)*np.cos(self.alpha_star())  # if 90deg, 0
+            self.orthmat[2, 1] = self.orthmat[1, 2]
+            self.orthmat[2, 2] = c*np.sin(self.beta)*np.sin(self.alpha_star())  # if 90deg, c
+            self.fracmat = np.linalg.inv(self.orthmat)
 
-        # orthogonalisation + fractionisation matrices
-        self.orthmat = np.identity(3)
-        self.orthmat[0, 0] = a
-        self.orthmat[0, 1] = b*np.cos(gamma)
-        self.orthmat[0, 2] = c*np.cos(beta)
-        self.orthmat[1, 1] = b*np.sin(gamma)
-        self.orthmat[1, 2] = -c*np.sin(beta)*np.cos(self.alpha_star())
-        self.orthmat[2, 2] = c*np.sin(beta)*np.sin(self.alpha_star())
-        self.fracmat = np.linalg.inv(self.orthmat)
-
-        # calculate metric_tensor
-        self.realmetric = self.metric_tensor(self.a, self.b, self.c,
-                                             self.alpha, self.beta, self.gamma)
-        self.recimetric = self.metric_tensor(self.a_star(), self.b_star(),
-                                             self.c_star(), self.alpha_star(),
-                                             self.beta_star(),
-                                             self.gamma_star())
+            # calculate metric_tensor
+            self.realmetric = self.metric_tensor(self.a, self.b, self.c,
+                                                 self.alpha, self.beta,
+                                                 self.gamma)
+            self.recimetric = self.metric_tensor(self.a_star(), self.b_star(),
+                                                 self.c_star(),
+                                                 self.alpha_star(),
+                                                 self.beta_star(),
+                                                 self.gamma_star())
 
     def alpha_star(self):
         return np.arccos((np.cos(self.gamma)*np.cos(self.beta)-np.cos(self.alpha))
@@ -294,25 +334,25 @@ class Cell:
     def c_star(self):
         return self.a*self.b*np.sin(self.gamma)/self.vol
 
-    def vol(self):
+    def volume(self):
         return self.vol
 
-    def a(self):
+    def geta(self):
         return self.a
 
-    def b(self):
+    def getb(self):
         return self.b
 
-    def c(self):
+    def getc(self):
         return self.c
 
-    def alpha(self):
+    def getalpha(self):
         return self.alpha
 
-    def beta(self):
+    def getbeta(self):
         return self.beta
 
-    def gamma(self):
+    def getgamma(self):
         return self.gamma
 
     def metric_tensor(self, a, b, c, alp, bet, gam):
@@ -640,12 +680,15 @@ class RadialFilter:
 
 # @dataclass #from dataclasses import dataclass
 class ResultsByCycle:
-    '''
+    """
     Dataclass to stor results for each cycle.
-    '''
+    """
     def __init__(self, cyclerr, cycle, resolution, radius,
                  mapmdlfrac, mapmdlfrac_reso,
                  mdlmapfrac, mdlmapfrac_reso, fscavg):
+        """
+        Initialise results for the cycle
+        """
         self.cyclerr = cyclerr
         self.cycle = cycle
         self.resolution = resolution
@@ -667,11 +710,23 @@ class ResultsByCycle:
     fscavg: float
     '''
     def write_xml_results_start(self, f):
+        """
+        Write the starting lines for XML output
+        Arguments:
+        *f*
+            file object
+        """
         f.write('<SheetbendResult>\n')
         f.write(' <Title>{0}</Title>\n'.format('temp'))
         f.write(' <Cycles>\n')
         
     def write_xml_results_end(self, f):
+        """
+        Write the ending lines for XML output
+        Arguments:
+        *f*
+            file object
+        """
         f.write(' </Cycles>\n')
         f.write(' <Final>\n')
         f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'
@@ -690,6 +745,12 @@ class ResultsByCycle:
         f.write('</SheetbendResult\n')
 
     def write_xml_results_cyc(self, f):
+        """
+        Write the results of the cycle for XML output
+        Arguments:
+        *f*
+            file object
+        """
         f.write('  <Cycle>\n')
         f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'
                 .format(self.cyclerr+1))

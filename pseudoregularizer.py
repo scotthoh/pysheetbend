@@ -89,7 +89,7 @@ class Pseudoregularize:
       self.chainIDs = self.atomList.get_chain_list() # list of chain ID
       self.fragsList = [] # list of fragments of atoms, len(fragsList)=number of fragments
       #self.fragsResRange = [] # listjhq ws of [start,end] res no for each fragment
-      self.frag_ref_CA = []
+      #self.frag_ref_CA = []
       stime = timer()
       # make a list of fragments with connected residues/atoms
       for c in self.chainIDs:
@@ -97,11 +97,18 @@ class Pseudoregularize:
         start_res = temp_chn[0].res_no
         end_res = temp_chn[-1].res_no
         frag_start = temp_chn[0].res_no
+        print(start_res, end_res)
         iscon = False
         for a in range(start_res, end_res): # loop through residues in chain
           frag0 = temp_chn.get_selection(a, a, chain=c)
           if not frag0:
-            continue
+            if a == (end_res - 1):
+                if temp_chn.get_residue(end_res):
+                    frag_start = end_res
+                    frag_end = end_res
+                    iscon = False
+            else:
+                continue
           elif not iscon:
               frag_start = a
           iscon = False
@@ -118,9 +125,11 @@ class Pseudoregularize:
           if not iscon: # add continuous fragment to list
             self.fragsList.append(temp_chn.get_selection(frag_start, frag_end, chain=c))
             #self.fragsResRange.append((frag_start, frag_end))
-            self.frag_ref_CA.append(self.fragsList[-1].get_CAonly())
+            #self.frag_ref_CA.append(self.fragsList[-1].get_CAonly())
       endtime = timer()
-      print('make frags time : ',endtime-stime)
+      print('make frags time : {0}'.format(endtime-stime))
+      #for f in self.fragsList:
+      #   print(f)
       '''
         self.chainList.append(temp_chn)
         tmp_resList = []
@@ -175,7 +184,18 @@ class Pseudoregularize:
 
         # find key atoms coord, use to determine per atom weights
         #frag_ref_CA = []
-        frag_ref_CA = frag_ref.get_CAonly()  # keys
+        if frag_ref[0].record_name != 'HETATM':
+            frag_ref_CA = frag_ref.get_CAonly()  # keys
+        else:
+            backbonelist = []
+            for atm in frag_ref.atomList:
+                if atm.get_name() == 'C1':
+                    backbonelist.append(atm.copy())
+            if len(backbonelist) != 0:
+                frag_ref_CA = BioPy_Structure(backbonelist[:])
+            else:
+                backbonelist.append(frag_ref.atomList[0].copy())
+                frag_ref_CA = BioPy_Structure(backbonelist[:])
         # get start/end atom index for each residue in fragment
         curr_res = frag_ref[0].res_no
         frag_ref_resIndex = [0]

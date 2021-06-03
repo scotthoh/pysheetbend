@@ -23,12 +23,12 @@ class sheetbendParser(object):
         )
 
         infiles.add_argument(
-            '-m1',
-            '--mapin1',
+            '-m2',
+            '--mapin2',
             help='Input map to be refined against reference map',
-            metavar='Input_map1',
+            metavar='Input_map2',
             type=str,
-            dest='mapin1',
+            dest='mapin2',
             default=None,
             required=False
         )
@@ -70,9 +70,9 @@ class sheetbendParser(object):
         outfiles.add_argument(
             '-xml',
             '--xmlout',
-            help='Prints xml output of the calculation. Default=program.xml',
-            metavar='Xmlout',
+            help='Prints xml output (results_by_cycle.xml) of the calculation.',
             type=str,
+            metavar='Xmlout',
             default='program.xml',
             dest='xmlout',
             required=False
@@ -156,7 +156,7 @@ class sheetbendParser(object):
                  (Default=5.0)''',
             metavar='Radius_scale',
             type=float,
-            default=5.0,
+            default=4.0,
             dest='radscl',
             required=False
         )
@@ -248,13 +248,13 @@ class sheetbendParser(object):
         for arg in vars(self.args):
             arg_val = getattr(self.args, arg)
             if isinstance(arg_val, list):
-                print(arg, arg_val)
+                print(' {0}: {1}'.format(arg, arg_val))
             if isinstance(arg_val, float):
                 if (arg_val > 0.0) and (not None):
-                    print(arg, arg_val)
+                    print(' {0}: {1}'.format(arg, arg_val))
             if isinstance(arg_val, int):
                 if arg_val > 0:
-                    print(arg, arg_val)
+                    print(' {0}: {1}'.format(arg, arg_val))
             if isinstance(arg_val, str):
                 if arg_val is not None:
-                    print(arg, arg_val)
+                    print(' {0}: {1}'.format(arg, arg_val))
