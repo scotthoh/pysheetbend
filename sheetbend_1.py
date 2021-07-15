@@ -1,7 +1,6 @@
 # Python implementation of csheebend to perform shift field refinement
 # Copyright 2018 Kevin Cowtan & University of York all rights reserved
 # Author: Soon Wen Hoh, University of York 2020
-
 '''from TEMPy.protein.structure_blurrer import StructureBlurrer
 from TEMPy.protein.scoring_functions import ScoringFunctions
 from TEMPy.protein.structure_parser import PDBParser
@@ -10,6 +9,7 @@ from TEMPy.maps.em_map import Map
 from TEMPy.math.vector import Vector
 from TEMPy.map_process.map_filters import Filter
 '''
+from __future__ import print_function # python 3 proof 
 from TEMPy.StructureBlurrer import StructureBlurrer
 from TEMPy.ScoringFunctions import ScoringFunctions
 from TEMPy.StructureParser import PDBParser
@@ -29,7 +29,6 @@ import os
 import scale_map.map_scaling as DFM
 
 from sheetbend_cmdln_parser import sheetbendParser
-
 # Parse command line input
 SP = sheetbendParser()
 SP.get_args()
@@ -61,11 +60,11 @@ ncycrr = 1  # refine-regularise-cycle
 fltr = 2  # quadratic filter
 hetatom = True
 biso_range = SP.args.biso_range
-ulo = sf_util.b2u(biso_range[0])
-uhi = sf_util.b2u(biso_range[1])
+#ulo = sf_util.b2u(biso_range[0])
+#uhi = sf_util.b2u(biso_range[1])
 
 timelog = sf_util.Profile()
-run_c = '6'
+run_c = '9'
 # defaults
 #if res <= 0.0:
 #    print('Please specify the resolution of the map!')
@@ -80,7 +79,7 @@ if resbycyc is None:
         resbycyc = [res]
     else:
         # need to change this python3 can use , end=''
-        print('Please specify the resolution of the map or')
+        print('Please specify the resolution of the map or ',end='')
         print('resolution by cycle.')
         exit('Program terminated ...')
 
@@ -126,11 +125,9 @@ if ippdb is not None:
     #                                                         hetatm=hetatom,
     #                                                         water=False)
     # TEMPy structure class
-    structure_instance = PDBParser.read_PDB_file(struc_id,
-                                                 ippdb,
-                                                 hetatm=hetatom,
-                                                 water=False)
-    original_structure = structure_instance.copy()
+    model = PDBParser.read_PDB_file(struc_id, ippdb, hetatm=hetatom,
+                                    water=False)
+    original_structure = model.copy()
 # read map
 if ipmap is not None:
     mapin = mp.readMRC(ipmap)
@@ -174,17 +171,7 @@ if ippdb is not None:
     #x_s = int(mapin.x_size() * apix)
     results = []
     map_shifted = mapin.copy()
-    map_shifted.fullMap = map_shifted.fullMap * 0
-    #map_shifted = structure_instance.calculate_rho(2.5, mapin, map_shifted)
-    #Map(np.zeros(mapin.fullMap.shape),
-    #                  mapin.origin,
-    #                  mapin.apix,
-    #                  'mapname',)
-    #map_shifted.apix = (apix * mapin.x_size()) / x_s
-    #map_shited = map_shifted.downsample_map(mapin.apix,
-    #                                        grid_shape=mapin.fullMap.shape)
-    #map_shifted.update_header()
-            
+    map_shifted.fullMap = map_shifted.fullMap * 0        
     dumap = map_shifted.copy()
     dvmap = map_shifted.copy()
     dwmap = map_shifted.copy()
@@ -192,7 +179,7 @@ if ippdb is not None:
     cmap = mapin.copy()
     cmap.fullMap = cmap.fullMap * 0
     timelog.start('MapDensityCalc')
-    cmap = structure_instance.calculate_rho(2.5, mapin, cmap)
+    cmap = model.calculate_rho(2.5, mapin, cmap)
     timelog.end('MapDensityCalc')
     timelog.start('Scoring')
     mapin_t = scorer.calculate_map_threshold(mapin)
@@ -210,7 +197,8 @@ if ippdb is not None:
     zls = np.linspace(0, nz, num=nz, endpoint=False)
     yls = np.linspace(0, ny, num=ny, endpoint=False)
     xls = np.linspace(0, nx, num=nx, endpoint=False)
-    cmap_interp = RegularGridInterpolator((zls, yls, xls), cmap.fullMap, bounds_error=False, fill_value=0.0)
+    cmap_interp = RegularGridInterpolator((zls, yls, xls), cmap.fullMap,
+                                          bounds_error=False, fill_value=0.0)
     timelog.end('InterpolSetup')
     zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
     indi = np.vstack([zg.ravel(), yg.ravel(), xg.ravel()]).T
@@ -221,7 +209,8 @@ if ippdb is not None:
     #indi_frac = indi / np.array([nz, ny, nx])
 
     # mask map
-    timelog.start('MaskMap')
+    
+    '''
     apix = mapin.apix
     x_s = int(map_shifted.x_size() * apix)
     y_s = int(map_shifted.y_size() * apix)
@@ -234,6 +223,12 @@ if ippdb is not None:
     newMap = newMap.downsample_map(mapin.apix,
                                    grid_shape=mapin.fullMap.shape)
     newMap.update_header()
+    newMap = model.make_mask(2.5, newMap)
+    mmap = newMap.copy()
+    '''
+    # mmap = mask
+    #newMap.fullMap[:] = 1.0
+    
     # maskmap at current reso
     #testmaskmap = Map(np.zeros((z_s, y_s, x_s)),
     #             map_shifted.origin,
@@ -243,11 +238,28 @@ if ippdb is not None:
     #testmaskmap = newMap.downsample_map(mapin.apix,
     #                               grid_shape=mapin.fullMap.shape)
     #testmaskmap.update_header()
-    #testmaskmap = SB.make_atom_overlay_map1(newMap, structure_instance)
-    newMap = structure_instance.make_mask(2.5, newMap)
-    # mmap = mask
-    #newMap.fullMap[:] = 1.0
-    mmap = newMap.copy()
+    #testmaskmap = SB.make_atom_overlay_map1(newMap, model)
+    #timelog.end('MaskMap')
+
+    # make mask from input map, lowpass 15A,
+    timelog.start('MaskMap')
+    fltrmap = Filter(mapin)
+    ftfilter = array_utils.tanh_lowpass(fltrmap.fullMap.shape,
+                                        mapin.apix/15.0,
+                                        fall=1)
+    lp_mapin = fltrmap.fourier_filter(ftfilter=ftfilter,
+                                      inplace=False)
+
+    mapt = scorer.calculate_map_threshold(lp_mapin)
+    print(mapt)
+    mmap = mapin.copy()
+    mmap.fullMap = (lp_mapin.fullMap > mapt) * 1.0
+    soft_mask_arr = array_utils.softmask_mean(mmap.fullMap, window=5)
+    mmap.fullMap = soft_mask_arr
+    mmap.update_header()
+    scorer.calculate_map_threshold(mmap)
+    mmap.fullMap = (soft_mask_arr > mapt) * 1.0
+    mmap.update_header()
     timelog.end('MaskMap')
     #testmaskmap.write_to_MRC_file('testmaskmap_{0}.map'.format(run_c))
 
@@ -319,12 +331,12 @@ if ippdb is not None:
             t = 2.5 if rcyc > 10.0 else 2.0 if rcyc > 6.0 else 1.5
             mapshift_t = 1.5*map_shifted.std()
             fltrcmap_t = t*np.std(lp_cmap.fullMap)
-            print('Calculated map threshold is ')  # end='')
-            print(' {0:.4f} and is {1:.4f} at current resolution'
+            print('Calculated map threshold is ', end='')
+            print('{0:.4f} and {1:.4f} at current resolution'
                   .format(mapin_t, lpmap_t))
 
-            print('Calculated model threshold is ')  # end='')
-            print(' {0:.4f} and is {1:.4f} at current resolution'
+            print('Calculated model threshold is ', end='')
+            print('{0:.4f} and {1:.4f} at current resolution'
                   .format(mapshift_t, fltrcmap_t))
 
             ovl_map1, ovl_mdl1 = scorer.calculate_overlap_scores(mapin,
@@ -337,15 +349,16 @@ if ippdb is not None:
                                                                  fltrcmap_t)
             timelog.end('Scoring')
             print('TEMPys scores :')
-            print('Fraction of map overlapping with model:')
-            print(' {0:.4f} and {1:.4f} at current resolution'
+            print('Fraction of map overlapping with model: ', end='')
+            print('{0:.4f} and {1:.4f} (current resolution)'
                   .format(ovl_map1, ovl_map2))
-            print('Fraction of model overlapping with map:')
-            print(' {0:.4f} and {1:.4f} at current resolution'
+            print('Fraction of model overlapping with map: ', end='')
+            print('{0:.4f} and {1:.4f} (current resolution)'
                   .format(ovl_mdl1, ovl_mdl2))
-            
-            
-            #mmap = sf_util.make_atom_overlay_map1_rad(newMap, structure_instance,
+
+            #if ovl_mdl1 > 0.5:
+            #    pseudoreg = True
+            #mmap = sf_util.make_atom_overlay_map1_rad(newMap, model,
             #                                          gridtree, 2.5)
             #print(np.count_nonzero(mmap.fullMap==0.0))
             # difference map at current reso, mmap
@@ -419,7 +432,7 @@ if ippdb is not None:
                 dvmap_f += 2.0*interp_x2(indi)  # np.modf(2.0*interp_x2(indi))[0]  # y direction
                 dwmap_f += 2.0*interp_x3(indi)  # np.modf(2.0*interp_x3(indi))[0]  # z direction
                 timelog.end('Interpolate')
-
+            '''
             if refuiso or (lastcyc and postrefuiso):
                 print('REFINE U ISO')
                 timelog.start('UISO')
@@ -427,7 +440,7 @@ if ippdb is not None:
                                                     radcyc, fltr, fft_obj,
                                                     ifft_obj, cell)
                 timelog.end('UISO')
-                for atm in structure_instance.atomList:
+                for atm in model.atomList:
                     timelog.start('CropMap')
                     try:
                         ax, ay, az, amass = SB.mapGridPosition(map_curreso,
@@ -457,18 +470,19 @@ if ippdb is not None:
                     
                     du = uhi if du > uhi else ulo if du < ulo else du
                     atm.temp_fac = atm.temp_fac - sf_util.u2b(du)
+            '''
             temp_result = sf_util.ResultsByCycle(cycrr, cyc, rcyc, radcyc,
                                                  ovl_map1, ovl_map2,
                                                  ovl_mdl1, ovl_mdl2, 0.0)
             results.append(temp_result)
 
-    # calculate final map
-    outcsv = 'shiftvars_total_{0}.csv'.format(run_c)
-    fopen = open(outcsv, 'w')
-    for j in range(0, len(dumap_f)):
-        fopen.write('{0}, {1}, {2}, {3}\n'.format(j, dumap_f[j], dvmap_f[j],
-                    dwmap_f[j]))
-    fopen.close()
+    # calculate final map & applying final shifts
+    #outcsv = 'shiftvars_total_{0}.csv'.format(run_c)
+    #fopen = open(outcsv, 'w')
+    #for j in range(0, len(dumap_f)):
+    #    fopen.write('{0}, {1}, {2}, {3}\n'.format(j, dumap_f[j], dvmap_f[j],
+    #                dwmap_f[j]))
+    #fopen.close()
 
     timelog.start('Interpolate')
     interp_dwmap = RegularGridInterpolator((zls, yls, xls),
@@ -478,39 +492,38 @@ if ippdb is not None:
     interp_dumap = RegularGridInterpolator((zls, yls, xls),
                                            dumap.fullMap)
 
-    p = structure_instance.map_grid_position_array(mapin, False)
+    p = model.map_grid_position_array(mapin, False)
     p = np.flip(p, 1)
     du = interp_dumap(p)
     dv = interp_dvmap(p)
     dw = interp_dwmap(p)
     timelog.end('Interpolate')
     timelog.start('UpdateModel')
-    for i in range(len(structure_instance)):
+    for i in range(len(model)):
         dx, dy, dz = np.matmul(np.array([du[i], dv[i], dw[i]]),
                                cell.orthmat)
         #dx, dy, dz = dxyz[i]
         if verbose >= 1:
             shift_vars.append([du[i], dv[i], dw[i],
                               dx, dy, dz])
-        structure_instance.atomList[i].translate(dx, dy, dz)
+        model.atomList[i].translate(dx, dy, dz)
     timelog.end('UpdateModel')
-    structure_instance.write_to_PDB('{0}_final_{1}.pdb'
-                                    .format(oppdb.strip('.pdb'), run_c),
-                                    hetatom=hetatom)
-    
+    model.write_to_PDB('{0}_final_{1}.pdb'.format(oppdb.strip('.pdb'), run_c),
+                       hetatom=hetatom)
+
     if pseudoreg:
         print('PSEUDOREGULARIZE')
         timelog.start('PSEUDOREG')
         start = timer()
-        structure_instance = preg.regularize_frag(structure_instance)
+        model = preg.regularize_frag(model)
         timelog.end('PSEUDOREG')
         end = timer()
         timelog.start('MapDensityCalc')
         cmap = mapin.copy()
         cmap.fullMap = cmap.fullMap * 0
-        cmap = structure_instance.calculate_rho(2.5, mapin, cmap)
-        #cmap = emc.calc_map_density(mapin, structure_instance)
-        timelog.start('MapDensityCalc')
+        cmap = model.calculate_rho(2.5, mapin, cmap)
+        #cmap = emc.calc_map_density(mapin, model)
+        timelog.end('MapDensityCalc')
         timelog.start('Scoring')
         cmap_t = 1.5*cmap.std()
         ovl_mapf, ovl_mdlf = scorer.calculate_overlap_scores(mapin, cmap,
@@ -523,16 +536,58 @@ if ippdb is not None:
         print('Fraction of model overlapping with map: {0:.3f}'
               .format(ovl_mdlf))
         print('time : ', end-start)
-    structure_instance.write_to_PDB('{0}_final_pseudoreg_{1}.pdb'
-                                    .format(oppdb.strip('.pdb'), run_c),
-                                    hetatom=hetatom)
+    
+    if refuiso:
+        print('REFINE U ISO')
+        cmap = mapin.copy()
+        cmap.fullMap = cmap.fullMap * 0
+        timelog.start('MapDensityCalc')
+        cmap = model.calculate_rho(2.5, mapin, cmap)
+        timelog.end('MapDensityCalc')
+        timelog.start('DiffMap')
+        dmap = DFM.get_diffmap12(mapin, cmap, resbycyc[-1], resbycyc[-1])
+        timelog.end('DiffMap')
+        x1map = Map(np.zeros(map_shifted.fullMap.shape),
+                    map_shifted.origin,
+                    map_shifted.apix,
+                    'mapname',)
+        timelog.start('UISO')
+        x1map = shiftfield.shift_field_uiso(cmap, dmap, mmap, x1map,
+                                            radcyc, fltr, fft_obj,
+                                            ifft_obj, cell)
+        timelog.end('UISO')
+        timelog.start('Interpolate')
+        interp_x1 = RegularGridInterpolator((zls, yls, xls),
+                                            x1map.fullMap)
+        v = model.map_grid_position_array(mapin, False)
+        v = np.flip(v, 1)
+        du = 1.0*interp_x1(v)
+        timelog.end('Interpolate')
+        timelog.start('UpdateModel')
+        #du = sf_util.limit_uiso(du, ulo, uhi)
+        db = sf_util.u2b(du)
+        for i in range(len(model)):
+            atm_bval = model.atomList[i].temp_fac - db[i]
+            model.atomList[i].temp_face = sf_util.limit_biso(atm_bval,
+                                                             biso_range[0],
+                                                             biso_range[1])
+            if verbose >= 1:
+                shift_U.append([model.atomList[i].temp_fac, du[i], db[i]])
+        timelog.end('UpdateModel')
+
+    model.write_to_PDB('{0}_final_pseudoreg_{1}.pdb'
+                       .format(oppdb.strip('.pdb'), run_c), hetatom=hetatom)
     outcsv = 'shiftvars_atoms_total_{0}.csv'.format(run_c)
+    uisocsv = 'shiftuiso_atoms_total_{0}.csv'.format(run_c)
     fopen = open(outcsv, 'w')
+    uisoopen = open(uisocsv, 'w')
     if verbose >= 1:
         for j in range(0, len(shift_vars)):
             fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
+            uisoopen.write('{0}, {1}\n'.format(j, shift_U[j]))
         fopen.close()
-    
+        uisoopen.close()
+
     # calculate final map applying final shifts
     timelog.start('CalcMapVal')
     im[:, 0] = dwmap_f * map_shifted.z_size()
@@ -555,7 +610,7 @@ if ippdb is not None:
                 results[i].write_xml_results_end(f)
         f.close()
     #cmap.fullMap = cmap.fullMap * 0
-    #cmap = structure_instance.calculate_rho(2.5, mapin, cmap)
+    #cmap = model.calculate_rho(2.5, mapin, cmap)
     # make shifted map
     #map_shifted = Map(mapin)
     #map_shifted.fullMap = map_shifted.fullMap * 0

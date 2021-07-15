@@ -128,13 +128,13 @@ def shift_field_coord(cmap, dmap, mask, x1map, x2map, x3map, rad, fltr,
     x23map = x2map.fullMap*x3map.fullMap
     x33map = x3map.fullMap*x3map.fullMap
     # filter
-    x33map1 = Map(np.zeros(cmap.fullMap.shape),
-                  cmap.origin,
-                  cmap.apix[0],
-                  'mapname',)
-    x33map1.fullMap = x33map
-    x33map1.update_header()
-    x33map1.write_to_MRC_file('x33_map1.map')
+    #x33map1 = Map(np.zeros(cmap.fullMap.shape),
+    #              cmap.origin,
+    #              cmap.apix[0],
+    #              'mapname',)
+    #x33map1.fullMap = x33map
+    #x33map1.update_header()
+    #x33map1.write_to_MRC_file('x33_map1.map')
 
     dmap.set_apix_tempy()
     start = timer()

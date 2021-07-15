@@ -44,6 +44,17 @@ class sheetbendParser(object):
             required=False
         )
 
+        infiles.add_argument(
+            '-maskin',
+            '--maskin',
+            help='Input mask.',
+            metavar='Input_mask',
+            type=str,
+            default=None,
+            dest='maskin',
+            required=False
+        )
+
         outfiles = parser.add_argument_group('Output Files')
         outfiles.add_argument(
             '-mapout',
@@ -258,3 +269,4 @@ class sheetbendParser(object):
             if isinstance(arg_val, str):
                 if arg_val is not None:
                     print(' {0}: {1}'.format(arg, arg_val))
+        print('')

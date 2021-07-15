@@ -220,28 +220,20 @@ def b2u(b_iso):
     return b_iso / eightpi2()
 
 
-def limit_uiso(u_iso, ulo, uhi):
+def limit_biso(b_iso, blo, bhi):
     """
-    Checks and return u_iso values within limit
+    Checks and return b_iso values within limit
     Arguments:
-    *u_iso*
-        array of U-isotropic values
-    *ulo*
-        lower limit of U-isotropic value
-    *uhi*
-        upper limit of U-isotropic value
+    *b_iso*
+        b isotropic value
+    *blo*
+        lower limit of b isotropic value
+    *bhi*
+        upper limit of b isotropic value
     """
-    if not len(u_iso) > 1:
-        return uhi if u_iso > uhi else ulo if u_iso < ulo else u_iso
-    else:
-        for i in range(len(u_iso)):
-            if u_iso[i] > uhi:
-                u_iso[i] = uhi
-            elif u_iso[i] < ulo:
-                u_iso[i] = ulo
-            else:
-                u_iso[i] = ulo
-        return u_iso
+    return bhi if b_iso > bhi else blo if b_iso < blo else b_iso
+    
+    return b_iso
 
 
 class Cell:
