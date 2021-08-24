@@ -1,10 +1,13 @@
 import numpy as np
 
 from timeit import default_timer as timer
+#'''
 from TEMPy.Quaternion import Quaternion
 from TEMPy.ProtRep_Biopy import BioPy_Structure
-
-
+'''
+from TEMPy.math.quaternion import Quaternion
+from TEMPy.protein.prot_rep_biopy import BioPy_Structure
+'''
 def RTop_orth(tgtArr, srcArr, weighted=False):
     '''
     Implemented in Clipper->coords.cpp, recoded here as independent code.

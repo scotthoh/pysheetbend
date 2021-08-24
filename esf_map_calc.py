@@ -436,6 +436,16 @@ class AtomShapeFn:
                 self.aw[3]*exp(self.bw[3]*rsq) +
                 self.aw[4]*exp(self.bw[4]*rsq)))
 
+    def rho_dist(self, dist):
+        rsq = dist*dist
+
+        return (self.occ * (self.aw[0]*exp(self.bw[0]*rsq) +
+                self.aw[1]*exp(self.bw[1]*rsq) +
+                self.aw[2]*exp(self.bw[2]*rsq) +
+                self.aw[3]*exp(self.bw[3]*rsq) +
+                self.aw[4]*exp(self.bw[4]*rsq)))
+
+
     def rho_arr(self, pos, apix):
         """
         Returns the array of electron density for the
@@ -613,7 +623,7 @@ def calc_map_density(mapin, structure_instance, verbose=0):
     *structure_instance*
         structure instance of the model
     """
-    from shiftfield_util import Profile
+    #from shiftfield_util import Profile
     # create new map initialised with 0 density value
     # based on input map's origin and grid spacing.
     # calculate new grid spacing and update
@@ -650,7 +660,7 @@ def calc_map_density(mapin, structure_instance, verbose=0):
     for atm in structure_instance.atomList:
         if verbose > 6:
             print(atm.write_to_PDB())
-        print(atm.fullid)
+            print(atm.fullid)
         # initialise atom for density calculation
         #timelog.start('initAtmSF')
         sf = AtomShapeFn(atm, is_iso=True)
@@ -698,13 +708,14 @@ def calc_map_density(mapin, structure_instance, verbose=0):
     return newMap
 
 
+
 if __name__ == '__main__':
     """
     test run
     """
     from TEMPy.MapParser import MapParser as mp
     from TEMPy.StructureParser import PDBParser
-
+    
     mapin = mp.readMRC('/home/swh514/Projects/data/EMD-3488/map/emd_3488.map')
     filename = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent'
     #mapin = mp.readMRC('/home/swh514/Projects/data/EMD-10530/map/emd_10530.map')
@@ -714,10 +725,21 @@ if __name__ == '__main__':
                                                     hetatm=True)
     print('Input Map : {0}'.format(mapin))
     print('Input Model : {0}'.format(filename))
+    '''
     from timeit import default_timer as timer
     start = timer()
-    calcDensMap = calc_map_density(mapin, structure_instance, verbose=1)
+    calcDensMap = calc_map_density(mapin, structure_instance, verbose=0)
     end = timer()
     print('Timer : {0}'.format(end-start))
     calcDensMap.write_to_MRC_file('test{0}_calc_density_map_out_9maptree.map'
                                     .format(strucID))
+    print(calcDensMap.fullMap.mean())
+    print(calcDensMap.fullMap.std())
+    print(calcDensMap.fullMap.max())
+    print(calcDensMap.fullMap.min())
+    '''
+    atm = structure_instance.atomList[0]
+    sf = AtomShapeFn(atm, is_iso=True)
+    print(sf.elem, sf.a, sf.b, sf.temp_fac, sf.res_no)
+    rho = sf.rho_dist(2)
+    print(rho, type(rho) )

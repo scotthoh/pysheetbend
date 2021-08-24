@@ -2,15 +2,21 @@
 # Copyright 2018 Kevin Cowtan & University of York all rights reserved
 # Author: Soon Wen Hoh, University of York 2020!
 
-'''from TEMPy.protein.structure_blurrer import StructureBlurrer
+
+from __future__ import print_function  # python 3 proof
+import sys
+#sys.path.append('/home/swh514/Projects/tempy/build/lib')
+sys.path.append('/home/swh514/Projects/testing_ground')
+sys.path.append('/home/swh514/Projects/ccpem_git/ccpem/src/ccpem_core')
+'''
+from TEMPy.protein.structure_blurrer import StructureBlurrer
 from TEMPy.protein.scoring_functions import ScoringFunctions
 from TEMPy.protein.structure_parser import PDBParser
 from TEMPy.maps.map_parser import MapParser as mp
 from TEMPy.maps.em_map import Map
-from TEMPy.math.vector import Vector
 from TEMPy.map_process.map_filters import Filter
+from TEMPy.map_process import array_utils
 '''
-from __future__ import print_function # python 3 proof 
 from TEMPy.StructureBlurrer import StructureBlurrer
 from TEMPy.ScoringFunctions import ScoringFunctions
 from TEMPy.StructureParser import PDBParser
@@ -18,10 +24,10 @@ from TEMPy.MapParser import MapParser as mp
 from TEMPy.EMMap import Map
 from TEMPy.mapprocess.mapfilters import Filter
 from TEMPy.mapprocess import array_utils
-
+#'''
 import numpy as np
 from timeit import default_timer as timer
-import esf_map_calc as emc
+#import esf_map_calc as emc
 import shiftfield as shiftfield
 import shiftfield_util as sf_util
 from scipy.interpolate import Rbf, RegularGridInterpolator
@@ -122,12 +128,6 @@ results = []
 # read model
 if ippdb is not None:
     struc_id = os.path.basename(ippdb).split('.')[0]
-    # for psedoregularizer use BioPy structure
-    # original_structure_BioPy = PDBParser.read_PDB_file_BioPy(struc_id, 
-    #                                                         ippdb,
-    #                                                         hetatm=hetatom,
-    #                                                         water=False)
-    # TEMPy structure class
     structure = PDBParser.read_PDB_file(struc_id,
                                         ippdb,
                                         hetatm=hetatom,
@@ -165,6 +165,7 @@ if ipmask is None:
     ftfilter = array_utils.tanh_lowpass(fltrmap.fullMap.shape,
                                         mapin.apix/15.0,
                                         fall=1)
+    print('fullmap {0}, fltr {1} '.format(fltrmap.fullMap.shape, ftfilter.shape)) 
     lp_maskin = fltrmap.fourier_filter(ftfilter=ftfilter,
                                        inplace=False)
     mapt = scorer.calculate_map_threshold(lp_maskin)
@@ -190,8 +191,6 @@ if ippdb is not None:
                      endpoint=False)
     xg = np.linspace(0, mapin.x_size(), num=mapin.x_size(),
                      endpoint=False)
-                
-    # Loop over refine regularise cycles
     for cycrr in range(0, ncycrr):
         print('\nRefine-regularise cycle: {0}\n'.format(cycrr+1))
         # loop over cycles
@@ -367,6 +366,15 @@ if ippdb is not None:
                         'mapname',)
             if refxyz:
                 timelog.start('Shiftfield')
+                x1m, x2m, x3m = shiftfield.shift_field_coord(lp_cmap.fullMap,
+                                                             dmap.fullMap,
+                                                             mmap.fullMap,
+                                                             radcyc, fltr,
+                                                             lp_cmap.origin,
+                                                             lp_cmap.apix,
+                                                             fft_obj,
+                                                             ifft_obj)
+                '''
                 x1map, x2map, x3map = shiftfield.shift_field_coord(lp_cmap,
                                                                    dmap, mmap,
                                                                    x1map,
@@ -375,14 +383,17 @@ if ippdb is not None:
                                                                    radcyc,
                                                                    fltr,
                                                                    fft_obj,
-                                                                   ifft_obj)
+                                                                   ifft_obj)'''
+                x1map.fullMap = x1m.copy()
+                x2map.fullMap = x2m.copy()
+                x3map.fullMap = x3m.copy()
                 timelog.end('Shiftfield')
                 # Read pdb and update
                 # need to use fractional coordinates for updating
                 # the derivatives.
                 # use linear interpolation instead of cubic
                 # size of x,y,z for x1map=x2map=x3map
-                
+                #print(x1map.fullMap.box_size())
                 timelog.start('Interpolate')
                 interp_x1 = RegularGridInterpolator((zg, yg, xg),
                                                     x1map.fullMap)
@@ -433,6 +444,7 @@ if ippdb is not None:
                 #print('time : ', end-start)
 
             # U-isotropic refinement
+            '''
             if refuiso and lastcyc:
                 print('REFINE U ISO')
                 timelog.start('UISO')
@@ -458,10 +470,11 @@ if ippdb is not None:
                         shift_U.append([structure.atomList[i].temp_fac,
                                         du[i], db[i]])
                 timelog.end('UpdateModel')
-                    
+            '''
             temp_result = sf_util.ResultsByCycle(cycrr, cyc, rcyc, radcyc,
                                                  ovl_map1, ovl_map2,
                                                  ovl_mdl1, ovl_mdl2, 0.0)
+            
             '''
             temp_result = results_by_cycle()
             temp_result.cycle = cyc

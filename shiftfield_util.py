@@ -6,15 +6,16 @@ import numpy as np
 from timeit import default_timer as timer
 from collections import OrderedDict
 #from time import perf_counter
-
-'''from TEMPy.math.vector import Vector
-from TEMPy.maps.map_parser import MapParser as mp
-from TEMPy.protein.structure_blurrer import StructureBlurrer
+'''
+from TEMPy.math.vector import Vector
+from TEMPy.maps.em_map import Map
+#from TEMPy.maps.map_parser import MapParser as mp
+#from TEMPy.protein.structure_blurrer import StructureBlurrer
 '''
 
 from TEMPy.Vector import Vector as Vector
 from TEMPy.EMMap import Map
-
+#'''
 try:
     import pyfftw
     pyfftw_flag = True
