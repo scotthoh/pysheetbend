@@ -6,8 +6,10 @@
 from __future__ import print_function  # python 3 proof
 import sys
 #sys.path.append('/home/swh514/Projects/tempy/build/lib')
-sys.path.append('/home/swh514/Projects/testing_ground')
-sys.path.append('/home/swh514/Projects/ccpem_git/ccpem/src/ccpem_core')
+try:
+    sys.path.append('/home/swh514/Projects/ccpem_git/ccpem/src/ccpem_core/TEMPy')
+except:
+    print("can't append")
 '''
 from TEMPy.protein.structure_blurrer import StructureBlurrer
 from TEMPy.protein.scoring_functions import ScoringFunctions
@@ -33,6 +35,7 @@ import shiftfield_util as sf_util
 from scipy.interpolate import Rbf, RegularGridInterpolator
 import pseudoregularizer
 import os
+sys.path.append('/home/swh514/Projects/testing_ground')
 import scale_map.map_scaling as DFM
 
 from sheetbend_cmdln_parser import sheetbendParser
@@ -48,6 +51,7 @@ if ippdb is None and ipmap is None:
           Program terminated...')
     exit()
 
+nomask = SP.args.nomask
 ipmap2 = SP.args.mapin2
 ipmask = SP.args.maskin
 opmap = SP.args.mapout  # sheetbend_mapout_result.map
@@ -71,7 +75,7 @@ hetatom = True
 biso_range = SP.args.biso_range
 #ulo = sf_util.b2u(biso_range[0])
 #uhi = sf_util.b2u(biso_range[1])
-mid_pseudoreg = False
+mid_pseudoreg = True
 timelog = sf_util.Profile()
 SP.print_args()
 # defaults
@@ -159,6 +163,11 @@ if pseudoreg:
 
 # create mask map if non is given at input
 # a mask that envelopes the whole particle/volume of interest
+if nomask:
+    mmap = mapin.copy()
+    mmap.fullMap[:] = 1.0
+    ipmask = mmap.copy()
+
 if ipmask is None:
     timelog.start('MaskMap')
     fltrmap = Filter(mapin)
@@ -201,7 +210,7 @@ if ippdb is not None:
             lastcyc = True if cyc == ncyc-1 else False
 
             # set resolution
-            fcyc = float(cyc) / max(float(ncyc-1), 1.0)
+            fcyc = (cyc) / max(float(ncyc-1), 1.0)
             fres = fcyc*float(len(resbycyc)-1)
             ires0 = int(fres)
             ires1 = min(ires0+1, int(len(resbycyc)-1))

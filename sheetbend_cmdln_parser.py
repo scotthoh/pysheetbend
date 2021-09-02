@@ -55,6 +55,15 @@ class sheetbendParser(object):
             required=False
         )
 
+        infiles.add_argument(
+            '-nm',
+            '--nomask',
+            help='No mask.',
+            action='store_true',
+            dest='nomask',
+            required=False,
+        )
+
         outfiles = parser.add_argument_group('Output Files')
         outfiles.add_argument(
             '-mapout',

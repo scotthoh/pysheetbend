@@ -103,7 +103,7 @@ def prepare_filter(radcyc, function, g_reci, g_sam, g_half,
     rad = effective_radius(function, fltr_rad)
     end = timer()
     print('Effective radius : {0}s'.format(end-start))
-    fltr_data_r = np.zeros(g_sam, dtype='float64')
+    fltr_data_r = np.zeros(g_sam, dtype='float32')
     # z,y,x convention
     #origin = np.array((origin[2], origin[1], origin[0]))
     if isinstance(apix, tuple):
@@ -168,16 +168,16 @@ def mapfilter(data_arr, fltr_data_r, scale, fft_obj, ifft_obj, g_sam, g_reci):
       ifft object
     """
     # copy map data and filter data
-    data_r = np.zeros(g_sam, dtype='float64')
+    data_r = np.zeros(g_sam, dtype='float32')
     data_r = data_arr.copy()
-    fltr_input = np.zeros(g_sam, dtype='float64')
+    fltr_input = np.zeros(g_sam, dtype='float32')
     fltr_input = fltr_data_r.copy()
     
     #if self.verbose >= 1:
     #    start = timer()
     # create complex data array
-    fltr_data_c = np.zeros(g_reci, dtype='complex128')
-    data_c = np.zeros(g_reci, dtype='complex128')
+    fltr_data_c = np.zeros(g_reci, dtype='complex64')
+    data_c = np.zeros(g_reci, dtype='complex64')
     # fourier transform of filter data
     fltr_data_c = fft_obj(fltr_input, fltr_data_c)
     fltr_data_c = fltr_data_c.conjugate().copy()
@@ -208,7 +208,7 @@ def mapfilter(data_arr, fltr_data_r, scale, fft_obj, ifft_obj, g_sam, g_reci):
     #    end = timer()
     #    print('ifft : {0}s'.format(end-start))
     return data_r
-
+'''
 def get_indices_zyx(origin, apix, array_shape):
     """
     Return gridtree and indices (z,y,x) convention
@@ -228,12 +228,12 @@ def get_indices_zyx(origin, apix, array_shape):
     # zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
     indi = np.vstack([zg.ravel(), yg.ravel(), xg.ravel()]).T
     return gridtree, indi
-
+'''
 
 @njit()
 def gradient_map_calc(xdata_c, g_reci, g_real, ch):
-    ydata_c = np.zeros(xdata_c.shape, dtype='complex128')
-    zdata_c = np.zeros(xdata_c.shape, dtype='complex128')
+    ydata_c = np.zeros(xdata_c.shape, dtype='complex64')
+    zdata_c = np.zeros(xdata_c.shape, dtype='complex64')
     i = complex(0.0, 1.0)
     for cz in range(g_reci[0]):    # z
         for cy in range(g_reci[1]):     # y
@@ -356,9 +356,9 @@ def shift_field_coord(cmap, dmap, mask, rad, fltr, origin, apix,
     if verbose >= 1:
         end = timer()
         print('3x conjugate : {0} s'.format(end-start))
-    zdata_r = np.zeros(data_r.shape, dtype='float64')
-    ydata_r = np.zeros(data_r.shape, dtype='float64')
-    xdata_r = np.zeros(data_r.shape, dtype='float64')
+    zdata_r = np.zeros(data_r.shape, dtype='float32')
+    ydata_r = np.zeros(data_r.shape, dtype='float32')
+    xdata_r = np.zeros(data_r.shape, dtype='float32')
     if verbose >= 1:
         start = timer()
     zdata_r = ifft_obj(zdata_c, zdata_r)
