@@ -6,13 +6,15 @@
 from TEMPy.maps.em_map import Map
 from TEMPy.math.vector import Vector
 '''
+from logging import raiseExceptions
 import numpy as np
 from timeit import default_timer as timer
 from numba import njit
 from math import fabs
 
 from numpy import linalg
-from numpy.linalg.linalg import solve
+#from numpy.linalg.linalg import solve
+import numpy.ma as ma
 
 # using numba here
 
@@ -103,7 +105,9 @@ def prepare_filter(radcyc, function, g_reci, g_sam, g_half,
     rad = effective_radius(function, fltr_rad)
     end = timer()
     print('Effective radius : {0}s'.format(end-start))
-    fltr_data_r = np.zeros(g_sam, dtype='float32')
+    fltr_data_r = np.zeros(g_sam, dtype='float64')
+    #fltr_data_r = np.zeros(g_sam, dtype='float32')
+    
     # z,y,x convention
     #origin = np.array((origin[2], origin[1], origin[0]))
     if isinstance(apix, tuple):
@@ -168,16 +172,20 @@ def mapfilter(data_arr, fltr_data_r, scale, fft_obj, ifft_obj, g_sam, g_reci):
       ifft object
     """
     # copy map data and filter data
-    data_r = np.zeros(g_sam, dtype='float32')
+    data_r = np.zeros(g_sam, dtype='float64')
+    #data_r = np.zeros(g_sam, dtype='float32')
     data_r = data_arr.copy()
-    fltr_input = np.zeros(g_sam, dtype='float32')
+    fltr_input = np.zeros(g_sam, dtype='float64')
+    #fltr_input = np.zeros(g_sam, dtype='float32')
     fltr_input = fltr_data_r.copy()
     
     #if self.verbose >= 1:
     #    start = timer()
     # create complex data array
-    fltr_data_c = np.zeros(g_reci, dtype='complex64')
-    data_c = np.zeros(g_reci, dtype='complex64')
+    fltr_data_c = np.zeros(g_reci, dtype='complex128')
+    data_c = np.zeros(g_reci, dtype='complex128')
+    #fltr_data_c = np.zeros(g_reci, dtype='complex64')
+    #data_c = np.zeros(g_reci, dtype='complex64')
     # fourier transform of filter data
     fltr_data_c = fft_obj(fltr_input, fltr_data_c)
     fltr_data_c = fltr_data_c.conjugate().copy()
@@ -202,6 +210,7 @@ def mapfilter(data_arr, fltr_data_r, scale, fft_obj, ifft_obj, g_sam, g_reci):
     # inverse fft
     #if self.verbose >= 1:
     #    start = timer()
+    print(data_r.dtype, data_c.dtype)
     data_c = data_c.conjugate().copy()
     data_r = ifft_obj(data_c, data_r)
     #if self.verbose >= 1:
@@ -232,8 +241,11 @@ def get_indices_zyx(origin, apix, array_shape):
 
 @njit()
 def gradient_map_calc(xdata_c, g_reci, g_real, ch):
-    ydata_c = np.zeros(xdata_c.shape, dtype='complex64')
-    zdata_c = np.zeros(xdata_c.shape, dtype='complex64')
+    ydata_c = np.zeros(xdata_c.shape, dtype='complex128')
+    zdata_c = np.zeros(xdata_c.shape, dtype='complex128')
+    #ydata_c = np.zeros(xdata_c.shape, dtype='complex64')
+    #zdata_c = np.zeros(xdata_c.shape, dtype='complex64')
+    
     i = complex(0.0, 1.0)
     for cz in range(g_reci[0]):    # z
         for cy in range(g_reci[1]):     # y
@@ -305,7 +317,7 @@ def cor_mod(a, b):
   
 #  return v
 
-def shift_field_coord(cmap, dmap, mask, rad, fltr, origin, apix,
+def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
                       fft_obj, ifft_obj, verbose=0):
     """
     Returns 3 map instances for shifts in x,y,z directions
@@ -356,9 +368,13 @@ def shift_field_coord(cmap, dmap, mask, rad, fltr, origin, apix,
     if verbose >= 1:
         end = timer()
         print('3x conjugate : {0} s'.format(end-start))
-    zdata_r = np.zeros(data_r.shape, dtype='float32')
-    ydata_r = np.zeros(data_r.shape, dtype='float32')
-    xdata_r = np.zeros(data_r.shape, dtype='float32')
+    zdata_r = np.zeros(data_r.shape, dtype='float64')
+    ydata_r = np.zeros(data_r.shape, dtype='float64')
+    xdata_r = np.zeros(data_r.shape, dtype='float64')
+    #zdata_r = np.zeros(data_r.shape, dtype='float32')
+    #ydata_r = np.zeros(data_r.shape, dtype='float32')
+    #xdata_r = np.zeros(data_r.shape, dtype='float32')
+    
     if verbose >= 1:
         start = timer()
     zdata_r = ifft_obj(zdata_c, zdata_r)
@@ -399,10 +415,15 @@ def shift_field_coord(cmap, dmap, mask, rad, fltr, origin, apix,
     #ymap = np.zeros(dmap.shape)
     #mmap = np.zeros(mask.shape)
     ymap = dmap.copy()
-    mmap = mask.copy()
-    y1map = x1map_r*ymap*mmap
-    y2map = x2map_r*ymap*mmap
-    y3map = x3map_r*ymap*mmap
+    #mmap = mask.copy()
+    ymap_m = ma.masked_array(ymap, mask=mmap).data
+    y1map = ma.masked_array(x1map_r, mask=mmap).data*ymap_m
+    # x1map_r*ymap*mmap
+    y2map = ma.masked_array(x2map_r, mask=mmap).data*ymap_m
+    y3map = ma.masked_array(x3map_r, mask=mmap).data*ymap_m
+    # y2map = x2map_r*ymap*mmap
+    # y3map = x3map_r*ymap*mmap
+    
     # print(np.count_nonzero(y1map==0.0), np.count_nonzero(y2map==0.0), np.count_nonzero(y3map==0.0))
     # calculate XTX  (removed multiply with mask)
     x11map = x1map_r*x1map_r
@@ -412,6 +433,10 @@ def shift_field_coord(cmap, dmap, mask, rad, fltr, origin, apix,
     x22map = x2map_r*x2map_r
     x23map = x2map_r*x3map_r
     x33map = x3map_r*x3map_r
+    #y1map = y1map.astype('float32')
+    #y2map = y2map.astype('float32')
+    #y3map = y3map.astype('float32')
+    
     # filter
     #x33map1 = Map(np.zeros(cmap.fullMap.shape),
     #              cmap.origin,
@@ -451,6 +476,7 @@ def shift_field_coord(cmap, dmap, mask, rad, fltr, origin, apix,
     #x33map1.update_header()
     #x33map1.write_to_MRC_file('x33_map_filtered.map')
     # calculate U shifts
+    
     start = timer()
     m = np.zeros((cmap.size, 3, 3))
     v = np.zeros((cmap.size, 3))
@@ -476,10 +502,20 @@ def shift_field_coord(cmap, dmap, mask, rad, fltr, origin, apix,
     m[:, 1, 2] = x23_f
     m[:, 2, 1] = x23_f
     m[:, 2, 2] = x33_f
+    print('check determinant')
+    det_m = np.linalg.det(m)
+    count_m0 = 0
+    for im in det_m:
+      if im == 0:
+        count_m0 += 1
+    print(count_m0)
     end = timer()
     print('Set matrix : {0} s'.format(end-start))
     start = timer()
     v[:] = np.linalg.solve(m[:], v[:])
+    #v = solve(m, v)
+    #v[:], residuals, rank, s = np.linalg.lstsq(m[:], v[:])
+    
     #v = solvelinalg(m[:], v[:])
     end = timer()
     print('Solve linalg : {0} s'.format(end-start))
@@ -624,3 +660,44 @@ def shift_field_uiso(cmap, dmap, mask, x1map, rad, fltr, fft_obj,
     x1map.fullMap[:, :, :] = y1map[:, :, :] / x11map[:, :, :]
 
     return x1map
+  
+
+@njit
+def solve(m, v):
+    #l = len(m)  # no of points
+    # check if matrix is square
+    l, r, c = m.shape
+    vl, vr = v.shape
+
+    if r != c:
+        #print('Matrix not square')
+        raise TypeError('Matrix not square')
+        return(-1) 
+    if r != vr:
+        raise TypeError('Matrix/Vector mismatch')
+        return(-1)
+
+    a = m.copy()
+    x = v.copy()
+    for p in range(0, l):
+        for i in range(0, r):
+            # pick largest pivot
+            j = i
+            for k in range(i+1, r):
+                if fabs(a[p, k, i]) > fabs(a[p, j, i]):
+                    j = k
+            # swap rows
+            for k in range(0, r):
+                a[p, i, k], a[p, j, k] = a[p, j, k], a[p, i, k]
+            x[p, i], x[p, j] = x[p, j], x[p, i]
+            # perform elimination
+            pivot = a[p, i, i]
+            for j in range(0, r):
+                if j != i:
+                    s = a[p, j, i]/pivot
+                    for k in range(i+1, r):
+                        a[p, j, k] = a[p, j, k] - s*a[p, i, k]
+                    x[p, j] = x[p, j] - s*x[p, i]
+        for i in range(0, r):
+            x[p, i] /= a[p, i, i]
+    return x

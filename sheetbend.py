@@ -26,8 +26,10 @@ from TEMPy.MapParser import MapParser as mp
 from TEMPy.EMMap import Map
 from TEMPy.mapprocess.mapfilters import Filter
 from TEMPy.mapprocess import array_utils
+from TEMPy.ProtRep_Biopy import BioPy_Structure
 #'''
 import numpy as np
+import numpy.ma as ma
 from timeit import default_timer as timer
 #import esf_map_calc as emc
 import shiftfield as shiftfield
@@ -136,10 +138,19 @@ if ippdb is not None:
                                         ippdb,
                                         hetatm=hetatom,
                                         water=False)
+    new_reordered_struct = []
+    chainList = structure.split_into_chains()
+    for c in chainList:
+        c.reorder_residues()
+        new_reordered_struct = np.append(new_reordered_struct, c)
+
+    #original_structure = structure.copy()
+    structure = BioPy_Structure(new_reordered_struct)
     original_structure = structure.copy()
 # read map
 if ipmap is not None:
     mapin = mp.readMRC(ipmap)
+    print(f"mapin dtype : {mapin.fullMap.dtype}")
     scorer = ScoringFunctions()
     SB = StructureBlurrer()
     # gridtree = SB.maptree(mapin)
@@ -164,8 +175,12 @@ if pseudoreg:
 # create mask map if non is given at input
 # a mask that envelopes the whole particle/volume of interest
 if nomask:
-    mmap = mapin.copy()
-    mmap.fullMap[:] = 1.0
+    #mmap = mapin.copy()
+    mmap = ma.make_mask_none(mapin.fullMap.shape)
+    #mmap = ma.masked_array(mapin.fullMap, mask=mask_arr)
+    print(mmap)
+    #mmap.fullMap[:] = 1.0
+    #print(f"mmap dtype : {mmap.fullMap.dtype}")
     ipmask = mmap.copy()
 
 if ipmask is None:
@@ -229,6 +244,7 @@ if ippdb is not None:
             fltrmap = Filter(mapin)
             # frequency from 0:0.5, 0.1 =10Angs, 0.5 = 2Angs ? or apix dependent?
             # 1/Angs = freq or apix/reso = freq?
+            print(f'filtermap dtype : {fltrmap.fullMap.dtype}')
             ftfilter = array_utils.tanh_lowpass(fltrmap.fullMap.shape,
                                                 mapin.apix/rcyc, fall=0.5)
             lp_map = fltrmap.fourier_filter(ftfilter=ftfilter,
@@ -343,7 +359,7 @@ if ippdb is not None:
             if verbose >= 1:
                 start = timer()
             timelog.start('DiffMap')
-            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
+            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc, debug=True)
             timelog.end('DiffMap')
             if verbose >= 1:
                 end = timer()
@@ -375,9 +391,14 @@ if ippdb is not None:
                         'mapname',)
             if refxyz:
                 timelog.start('Shiftfield')
+                print(f'maps dtype, lpcmap : {lp_cmap.fullMap.dtype}')
+                #print(f'mmap dtype : {mmap.fullMap.dtype}')
+                print(f'dmap dtype : {dmap.fullMap.dtype}')
+                #lp_cmap.fullMap = lp_cmap.fullMap.astype('float64')
+                #dmap.fullMap = dmap.fullMap.astype('float64')
                 x1m, x2m, x3m = shiftfield.shift_field_coord(lp_cmap.fullMap,
                                                              dmap.fullMap,
-                                                             mmap.fullMap,
+                                                             mmap,
                                                              radcyc, fltr,
                                                              lp_cmap.origin,
                                                              lp_cmap.apix,
@@ -499,7 +520,7 @@ if ippdb is not None:
                 outname = '{0}_{1}.pdb'.format(oppdb.strip('.pdb'), cyc+1)
                 structure.write_to_PDB(outname, hetatom=hetatom)
             if len(shift_vars) != 0:
-                outcsv = 'shiftvars1_withorthmat_{0}.csv'.format(cyc+1)
+                outcsv = 'shiftvars1_withorthmat_nplinalg_{0}.csv'.format(cyc+1)
                 fopen = open(outcsv, 'w')
                 for j in range(0, len(shift_vars)):
                     fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
@@ -564,7 +585,7 @@ if ippdb is None:
 
 # write final pdb
 if ippdb is not None:
-    structure.write_to_PDB('{0}_final.pdb'.format(oppdb.strip('.pdb')),
+    structure.write_to_PDB('{0}_nplinalg_final.pdb'.format(oppdb.strip('.pdb')),
                            hetatom=hetatom)
 
 # write xml results

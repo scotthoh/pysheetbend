@@ -115,9 +115,11 @@ def plan_fft(grid_dim):
             raise ImportError
 
         input_arr = pyfftw.empty_aligned(grid_dim.grid_sam,
-                                         dtype='float32', n=16)
+                                         #dtype='float32', n=16)
+                                         dtype='float64', n=16)
         output_arr = pyfftw.empty_aligned(output_shape,
-                                          dtype='complex64', n=16)
+                                          #dtype='complex64', n=16)
+                                          dtype='complex128', n=16)
         # fft planning
         fft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_FORWARD',
                           axes=(0, 1, 2), flags=['FFTW_ESTIMATE'])
@@ -140,9 +142,11 @@ def plan_ifft(grid_dim):
         if not pyfftw_flag:
             raise ImportError
         input_arr = pyfftw.empty_aligned(grid_dim.g_reci,
-                                         dtype='complex64', n=16)
+                                         dtype='complex128', n=16)
+                                         #dtype='complex64', n=16)
         output_arr = pyfftw.empty_aligned(output_shape,
-                                          dtype='float32', n=16)
+                                          #dtype='float32', n=16)
+                                          dtype='float64', n=16)
         # ifft planning,
         ifft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_BACKWARD', axes=(0,1,2), flags=['FFTW_ESTIMATE'])
     except ImportError:

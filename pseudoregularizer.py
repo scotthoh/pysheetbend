@@ -119,16 +119,17 @@ class Pseudoregularize:
                 if a1 <= end_res:
                     frag1 = temp_chn.get_selection(a1, a1, chain=c)
                     if frag1:
-                    for atm in frag0: # check if residues a, a1 are connected
-                        for atm1 in frag1:
-                            if atm.distance_from_atom(atm1) < self.crad:
-                                iscon = True
-                                frag_end = a1
+                        # check if residues a, a1 are connected
+                        for atm in frag0:
+                            for atm1 in frag1:
+                                if atm.distance_from_atom(atm1) < self.crad:
+                                    iscon = True
+                                    frag_end = a1
                     if not iscon:
                         frag_end = a
                 else:
                     frag_end = a
-                if not iscon: # add continuous fragment to fragList
+                if not iscon:  # add continuous fragment to fragList
                     #print(frag_start, frag_end)
                     self.fragsList.append(temp_chn.get_selection(frag_start,
                                                                  frag_end,
@@ -136,7 +137,7 @@ class Pseudoregularize:
                     #self.fragsResRange.append((frag_start, frag_end))
                     #self.frag_ref_CA.append(self.fragsList[-1].get_CAonly())
         #print(len(self.fragsList))
-        self.check_fraglist()
+        #self.check_fraglist()
         endtime = timer()
         print('make frags time : {0}'.format(endtime-stime))
         #for f in self.fragsList:
@@ -190,13 +191,13 @@ class Pseudoregularize:
 
     def regularize_frag(self, mol_work):
         new_molwork = []
-        self.check_fraglist()
+        #self.check_fraglist()
         for x in self.fragsList: #range(len(self.fragsList)): # list of fragments of atoms
             # get fragments from work molecule and reference molecule
             frag_ref = x.copy()
             frag_work = mol_work.get_selection(x[0].res_no, x[-1].res_no, chain=x[0].chain)
-            print(f'frag_ref len : {len(frag_ref)}')
-            print(f'frag_work len : {len(frag_work)}')
+            #print(f'frag_ref len : {len(frag_ref)}')
+            #print(f'frag_work len : {len(frag_work)}')
 
             #frag_ref = self.atomList.get_selection(self.fragsList[x][0][0], self.fragsList[x][0][-1], chain=self.fragsList[x][1])
 
@@ -208,6 +209,7 @@ class Pseudoregularize:
                 backbonelist = []
                 for atm in frag_ref.atomList:
                     if atm.get_name() == 'C1':
+                        print(atm)
                         backbonelist.append(atm.copy())
                 if len(backbonelist) != 0:
                     frag_ref_CA = BioPy_Structure(backbonelist[:])
@@ -222,8 +224,8 @@ class Pseudoregularize:
                     frag_ref_resIndex.append(i)
                     curr_res = frag_ref[i].res_no
             frag_ref_resIndex.append(len(frag_ref)) # the last one to mark end of last residue
-            print(f'frag_ref_CA len : {len(frag_ref_CA)}')
-            print(f'{frag_ref_CA}')
+            #print(f'frag_ref_CA len : {len(frag_ref_CA)}')
+            #print(f'{frag_ref_CA}')
             # make table of distances by atom
             w0 = []
             w1 = []
@@ -240,9 +242,9 @@ class Pseudoregularize:
                     r0 = 1.0e6
                     r2 = 1.0e6
                     if r-1 >= 0:
-                    r0 = a.distance_from_atom(frag_ref_CA[r-1])
+                        r0 = a.distance_from_atom(frag_ref_CA[r-1])
                     if r+1 < len(frag_ref_CA):
-                    r2 = a.distance_from_atom(frag_ref_CA[r+1])
+                        r2 = a.distance_from_atom(frag_ref_CA[r+1])
                     w00 = min((1.0 - r0/d0), 0.5)
                     w02 = min(1.0 - r2/d2, 0.5)
                     w01 = 1.0 - (w00 + w02)
@@ -354,8 +356,8 @@ class Pseudoregularize:
 
 
             # make weighted combination
-            print(len(w0), len(w1), len(w2))
-            print(len(f0), len(f1), len(f2))
+            #print(len(w0), len(w1), len(w2))
+            #print(len(f0), len(f1), len(f2))
             #print(frag_ref)
             #print(frag_work)
             #print('debug')

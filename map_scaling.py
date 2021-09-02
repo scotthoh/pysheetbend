@@ -45,7 +45,7 @@ def write_mapfile(mapobj, map_path):
         mapobj.write_to_MRC_file(map_path)
     #mrcfile map
     elif mrcfile_import:
-        newmrcobj = mrcfile.new(map_path,overwrite=True)
+        newmrcobj = mrcfile.new(map_path, overwrite=True)
         mapobj.set_newmap_data_header(newmrcobj)
         newmrcobj.close()
     #tempy mapprocess map
