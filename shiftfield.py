@@ -417,22 +417,28 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     ymap = dmap.copy()
     #mmap = mask.copy()
     ymap_m = ma.masked_array(ymap, mask=mmap).data
-    y1map = ma.masked_array(x1map_r, mask=mmap).data*ymap_m
+    x1map_m = ma.masked_array(x1map_r, mask=mmap).data
     # x1map_r*ymap*mmap
-    y2map = ma.masked_array(x2map_r, mask=mmap).data*ymap_m
-    y3map = ma.masked_array(x3map_r, mask=mmap).data*ymap_m
+    x2map_m = ma.masked_array(x2map_r, mask=mmap).data
+    x3map_m = ma.masked_array(x3map_r, mask=mmap).data
+    
+    y1map = x1map_m*ymap_m
+    # x1map_r*ymap*mmap
+    y2map = x2map_m*ymap_m
+    y3map = x3map_m*ymap_m
     # y2map = x2map_r*ymap*mmap
     # y3map = x3map_r*ymap*mmap
     
     # print(np.count_nonzero(y1map==0.0), np.count_nonzero(y2map==0.0), np.count_nonzero(y3map==0.0))
     # calculate XTX  (removed multiply with mask)
-    x11map = x1map_r*x1map_r
+    x11map = x1map_m*x1map_m
     # print(np.array_equal(x11map, x1map.fullMap))
-    x12map = x1map_r*x2map_r
-    x13map = x1map_r*x3map_r
-    x22map = x2map_r*x2map_r
-    x23map = x2map_r*x3map_r
-    x33map = x3map_r*x3map_r
+    # was  x12map = x1map_r*x2map_r    
+    x12map = x1map_m*x2map_m
+    x13map = x1map_m*x3map_m
+    x22map = x2map_m*x2map_m
+    x23map = x2map_m*x3map_m
+    x33map = x3map_m*x3map_m
     #y1map = y1map.astype('float32')
     #y2map = y2map.astype('float32')
     #y3map = y3map.astype('float32')
@@ -578,7 +584,7 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     return x1map_r, x2map_r, x3map_r
 
 
-#@njit()
+@njit()
 def metric_reci_lengthsq(x, y, z, celldim):
     '''
     (x*(x*a*a + y*2.0*a*b*np.cos(gam) + z*2.0*a*c*np.cos(bet))
@@ -590,7 +596,7 @@ def metric_reci_lengthsq(x, y, z, celldim):
             + z*z*celldim[2]*celldim[2])
 
 
-def shift_field_uiso(cmap, dmap, mask, x1map, rad, fltr, fft_obj,
+def shift_field_uiso(cmap, dmap, mmap, rad, fltr, origin, apix, fft_obj,
                      ifft_obj, g_cell, verbose=0):
     """
     Performs shift field refinement on isotropic U values
@@ -612,11 +618,11 @@ def shift_field_uiso(cmap, dmap, mask, x1map, rad, fltr, fft_obj,
     *ifft_obj*
       Planned ifft object
     """
-    g_reci = (cmap.z_size(), cmap.y_size(), cmap.x_size()//2+1)
+    g_reci = (cmap.shape[2], cmap.shape[1], cmap.shape[0]//2+1)
     g_real = (g_reci[0], g_reci[1], int(g_reci[2]-1)*2)
     ch = (g_real[0]//2, g_real[1]//2, g_real[2]//2+1)
     # fullMap is numpy array
-    data_r = cmap.fullMap
+    data_r = cmap
     if verbose >= 1:
         start = timer()
     data_c = fft_obj(data_r)
@@ -625,7 +631,7 @@ def shift_field_uiso(cmap, dmap, mask, x1map, rad, fltr, fft_obj,
         end = timer()
         print('first ft ', end-start)
     # calculate gradient map coefficients
-    zdata_c, ydata_c, xdata_c = gradient_map_iso_calc(data_c, g_reci, g_real,
+    data_c = gradient_map_iso_calc(data_c, g_reci, g_real,
                                                       ch, g_cell)
     '''for cz in range(0, g_reci_[0]):    # z
         for cy in range(0, g_reci_[1]):     # y
@@ -637,30 +643,39 @@ def shift_field_uiso(cmap, dmap, mask, x1map, rad, fltr, fft_obj,
     # calculate gradient maps
     data_c = data_c.conjugate().copy()
     data_r = ifft_obj(data_c)
-    x1map.fullMap = data_r.copy()
+    x1map = data_r.copy()
 
     # make xmap
-    ymap = np.zeros(dmap.fullMap.shape)
-    mmap = np.zeros(mask.fullMap.shape)
-    ymap = dmap.fullMap.copy()
-    mmap = mask.fullMap.copy()
+    #ymap = np.zeros(dmap.fullMap.shape)
+    #mmap = np.zeros(mask.fullMap.shape)
+    #ymap = dmap.fullMap.copy()
+
+    ymap_m = ma.masked_array(dmap, mask=mmap).data
+    x1map_m = ma.masked_array(x1map, mask=mmap).data
     # calculate XTY apply mask
-    y1map = x1map.fullMap*ymap*mmap
+    y1map = x1map_m*ymap_m
+    #y1map = x1map.fullMap*ymap_m
     # calculate XTX
-    x11map = x1map.fullMap*x1map.fullMap
+    x11map = x1map_m*x1map_m
 
     # filter maps
-    dmap.set_apix_tempy()
-    mf = RadialFilter(rad, fltr, g_reci, g_real, ch,
-                      dmap.origin, dmap.apix, dmap.fullMap.shape)
-    y1map = mf.mapfilter(y1map, fft_obj, ifft_obj)
-    x11map = mf.mapfilter(x11map, fft_obj, ifft_obj)
+    #dmap.set_apix_tempy()
+    fltr_data_r, scale = prepare_filter(rad, fltr, g_reci, g_real, ch,
+                                        origin, apix, dmap.shape)
+    y1map = mapfilter(y1map, fltr_data_r, scale, fft_obj, ifft_obj, g_real,
+                      g_reci)
+    x11map = mapfilter(x11map, fltr_data_r, scale, fft_obj, ifft_obj, g_real,
+                       g_reci)
+    #mf = RadialFilter(rad, fltr, g_reci, g_real, ch,
+    #                  dmap.origin, dmap.apix, dmap.fullMap.shape)
+    #y1map = mf.mapfilter(y1map, fft_obj, ifft_obj)
+    #x11map = mf.mapfilter(x11map, fft_obj, ifft_obj)
 
     # calculate U shifts
-    x1map.fullMap[:, :, :] = y1map[:, :, :] / x11map[:, :, :]
+    x1map[:, :, :] = y1map[:, :, :] / x11map[:, :, :]
 
     return x1map
-  
+
 
 @njit
 def solve(m, v):

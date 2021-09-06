@@ -42,6 +42,25 @@ import scale_map.map_scaling as DFM
 
 from sheetbend_cmdln_parser import sheetbendParser
 
+
+def has_converged(model0, model1, coor_tol, bfac_tol):
+    coor_sum_sq = 0
+    bfac_sum_sq = 0
+    num_atms = len(model0)
+    for i in range(0, num_atms):
+        d = model0.atomList[i].distance_from_atom(model1.atomList[i])
+        coor_sum_sq += np.square(d)
+        d_bfac = model0.atomList[i].temp_fac - model1.atomList[i].temp_fac
+        bfac_sum_sq += np.square(d_bfac)
+    
+    coor_rmsd = np.sqrt(coor_sum_sq/num_atms)
+    bfac_rmsd = np.sqrt(bfac_sum_sq/num_atms)
+    print("Testing for convergence")
+    print(f"Coordinate RMSD : {coor_rmsd}")
+    print(f"B-factor RMSD : {bfac_rmsd}")
+    return (coor_rmsd < coor_tol and bfac_rmsd < bfac_tol)
+
+
 # Parse command line input
 SP = sheetbendParser()
 SP.get_args()
@@ -217,7 +236,14 @@ if ippdb is not None:
                      endpoint=False)
     for cycrr in range(0, ncycrr):
         print('\nRefine-regularise cycle: {0}\n'.format(cycrr+1))
-        # loop over cycles
+        # previously: loop over cycles
+        # new: loop over resolutions
+        #for ires in range(0, len(resbycyc)):
+        #    lastres = (ires == len(resbycyc)-1)
+        #    rcyc = resbycyc[ires]
+        #    #coor_tol = 0.01 * rcyc
+        #    #bfac_tol = 0.5 * rcyc
+            
         for cyc in range(0, ncyc):
             shift_vars = []
             shift_U = []
@@ -449,7 +475,7 @@ if ippdb is not None:
                     structure.atomList[i].translate(dx, dy, dz)
                 timelog.end('UpdateModel')
             
-            if mid_pseudoreg:
+            if pseudoreg:
                 print('PSEUDOREGULARIZE')
                 timelog.start('MIDPSEUDOREG')
                 structure = preg.regularize_frag(structure)
@@ -474,13 +500,19 @@ if ippdb is not None:
                 #print('time : ', end-start)
 
             # U-isotropic refinement
-            '''
+            
             if refuiso and lastcyc:
                 print('REFINE U ISO')
                 timelog.start('UISO')
-                x1map = shiftfield.shift_field_uiso(lp_cmap, dmap, mmap, x1map,
-                                                    radcyc, fltr, fft_obj,
-                                                    ifft_obj, cell)
+                x1m = shiftfield.shift_field_uiso(lp_cmap.fullMap,
+                                                    dmap.fullMap, mmap,
+                                                    radcyc, fltr,
+                                                    lp_cmap.origin,
+                                                    lp_cmap.apix, fft_obj,
+                                                    ifft_obj,
+                                                    (cell.a,
+                                                     cell.b, cell.c))
+                x1map.fullMap = x1m.copy()
                 timelog.end('UISO')
                 timelog.start('Interpolate')
                 interp_x1 = RegularGridInterpolator((zg, yg, xg),
@@ -500,7 +532,7 @@ if ippdb is not None:
                         shift_U.append([structure.atomList[i].temp_fac,
                                         du[i], db[i]])
                 timelog.end('UpdateModel')
-            '''
+            
             temp_result = sf_util.ResultsByCycle(cycrr, cyc, rcyc, radcyc,
                                                  ovl_map1, ovl_map2,
                                                  ovl_mdl1, ovl_mdl2, 0.0)
@@ -519,20 +551,20 @@ if ippdb is not None:
             if output_intermediate:
                 outname = '{0}_{1}.pdb'.format(oppdb.strip('.pdb'), cyc+1)
                 structure.write_to_PDB(outname, hetatom=hetatom)
-            if len(shift_vars) != 0:
-                outcsv = 'shiftvars1_withorthmat_nplinalg_{0}.csv'.format(cyc+1)
-                fopen = open(outcsv, 'w')
-                for j in range(0, len(shift_vars)):
-                    fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
-                fopen.close()
-            if len(shift_U) != 0:
-                outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
-                fuiso = open(outusiocsv, 'w')
-                for j in range(0, len(shift_U)):
-                    fuiso.write('{0}, {1}\n'.format(j, shift_U[j]))
-                fuiso.close()
+            #if len(shift_vars) != 0:
+            #    outcsv = 'shiftvars1_withorthmat_nplinalg_{0}.csv'.format(cyc+1)
+            #    fopen = open(outcsv, 'w')
+            #    for j in range(0, len(shift_vars)):
+            #        fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
+            #    fopen.close()
+            #if len(shift_U) != 0:
+            #    outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
+            #    fuiso = open(outusiocsv, 'w')
+            #    for j in range(0, len(shift_U)):
+            #        fuiso.write('{0}, {1}\n'.format(j, shift_U[j]))
+            #    fuiso.close()
             # end of cycle loop
-        if pseudoreg:
+        '''if pseudoreg:
             print('PSEUDOREGULARIZE')
             timelog.start('PSEUDOREG')
             structure = preg.regularize_frag(structure)
@@ -554,7 +586,7 @@ if ippdb is not None:
                   .format(ovl_mapf))
             print('Fraction of model overlapping with map: {0:.3f}'
                   .format(ovl_mdlf))
-            
+        '''    
         # end of psedo reg loop
 
 # CASE 2: refine against observations
@@ -585,7 +617,7 @@ if ippdb is None:
 
 # write final pdb
 if ippdb is not None:
-    structure.write_to_PDB('{0}_nplinalg_final.pdb'.format(oppdb.strip('.pdb')),
+    structure.write_to_PDB('{0}_sheetbendfinal.pdb'.format(oppdb.strip('.pdb')),
                            hetatom=hetatom)
 
 # write xml results

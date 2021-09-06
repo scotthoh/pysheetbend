@@ -100,7 +100,7 @@ class Pseudoregularize:
             start_res = temp_chn[0].res_no
             end_res = temp_chn[-1].res_no
             frag_start = temp_chn[0].res_no
-            #print(start_res, end_res)
+            print(start_res, end_res)
             iscon = False
             for a in range(start_res, end_res+1): # loop through residues in chain
                 frag0 = temp_chn.get_selection(a, a, chain=c)
@@ -129,15 +129,17 @@ class Pseudoregularize:
                         frag_end = a
                 else:
                     frag_end = a
+                print(iscon)
                 if not iscon:  # add continuous fragment to fragList
                     #print(frag_start, frag_end)
-                    self.fragsList.append(temp_chn.get_selection(frag_start,
-                                                                 frag_end,
-                                                                 chain=c))
+                    fragtmp = temp_chn.get_selection(frag_start, frag_end,
+                                                     chain=c)
+                    if fragtmp:  # make sure not empty
+                        self.fragsList.append(fragtmp)
                     #self.fragsResRange.append((frag_start, frag_end))
                     #self.frag_ref_CA.append(self.fragsList[-1].get_CAonly())
-        #print(len(self.fragsList))
-        #self.check_fraglist()
+        #print(f'frags list len : {len(self.fragsList)}')
+        self.check_fraglist()
         endtime = timer()
         print('make frags time : {0}'.format(endtime-stime))
         #for f in self.fragsList:

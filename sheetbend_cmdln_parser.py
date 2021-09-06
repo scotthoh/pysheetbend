@@ -193,8 +193,8 @@ class sheetbendParser(object):
         )
 
         refine.add_argument(
-            '-u-iso',
-            '--u-iso',
+            '-uiso',
+            '--uiso',
             help='''Perform B-factor refinement. (Default=False)''',
             action='store_true',
             dest='refuiso',
