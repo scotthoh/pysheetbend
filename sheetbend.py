@@ -385,7 +385,7 @@ if ippdb is not None:
             if verbose >= 1:
                 start = timer()
             timelog.start('DiffMap')
-            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc, debug=True)
+            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
             timelog.end('DiffMap')
             if verbose >= 1:
                 end = timer()

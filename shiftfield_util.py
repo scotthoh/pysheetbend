@@ -5,6 +5,7 @@ import math
 import numpy as np
 from timeit import default_timer as timer
 from collections import OrderedDict
+import os
 #from time import perf_counter
 '''
 from TEMPy.math.vector import Vector
@@ -714,7 +715,7 @@ class ResultsByCycle:
             file object
         """
         f.write('<SheetbendResult>\n')
-        f.write(' <Title>{0}</Title>\n'.format(ippdb))
+        f.write(' <Title>{0}</Title>\n'.format(os.path.basename(ippdb)))
         f.write(' <RefinedPDB>{0}</RefinedPDB>\n'.format(oppdb))
         f.write(' <Cycles>\n')
         
@@ -740,7 +741,7 @@ class ResultsByCycle:
         f.write('   <OverlapModelAtResolution>{0}</OverlapModekAtResolution>\n'
                 .format(self.mdlmapfrac_reso))
         f.write(' </Final>\n')
-        f.write('</SheetbendResult\n')
+        f.write('</SheetbendResult>\n')
 
     def write_xml_results_cyc(self, f):
         """
