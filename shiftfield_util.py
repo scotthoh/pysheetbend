@@ -738,7 +738,7 @@ class ResultsByCycle:
                 .format(self.mapmdlfrac_reso))
         f.write('   <OverlapModel>{0}</OverlapModel>\n'
                 .format(self.mdlmapfrac))
-        f.write('   <OverlapModelAtResolution>{0}</OverlapModekAtResolution>\n'
+        f.write('   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n'
                 .format(self.mdlmapfrac_reso))
         f.write(' </Final>\n')
         f.write('</SheetbendResult>\n')
@@ -761,7 +761,7 @@ class ResultsByCycle:
                 .format(self.mapmdlfrac_reso))
         f.write('   <OverlapModel>{0}</OverlapModel>\n'
                 .format(self.mdlmapfrac))
-        f.write('   <OverlapModelAtResolution>{0}</OverlapModekAtResolution>\n'
+        f.write('   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n'
                 .format(self.mdlmapfrac_reso))
         f.write('  </Cycle>\n')
 

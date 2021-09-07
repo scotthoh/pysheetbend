@@ -8,6 +8,7 @@ import sys
 #sys.path.append('/home/swh514/Projects/tempy/build/lib')
 try:
     sys.path.append('/home/swh514/Projects/ccpem_git/ccpem/src/ccpem_core/TEMPy')
+    sys.path.append('/y/people/swh514/Documents/Projects/ccpem_git/ccpem_synced/ccpem/src/ccpem_core')
 except:
     print("can't append")
 '''
@@ -38,6 +39,7 @@ from scipy.interpolate import Rbf, RegularGridInterpolator
 import pseudoregularizer
 import os
 sys.path.append('/home/swh514/Projects/testing_ground')
+sys.path.append('/y/people/swh514/Documents/Projects/sheetbend_python')
 import scale_map.map_scaling as DFM
 
 from sheetbend_cmdln_parser import sheetbendParser
