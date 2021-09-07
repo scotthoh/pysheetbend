@@ -88,6 +88,7 @@ class Pseudoregularize:
     '''
     def __init__(self, atomList):
         self.crad = 2.4
+        self.got_hetatm = False
         self.atomList = atomList.copy()
         self.chainIDs = self.atomList.get_chain_list() # list of chain ID
         self.fragsList = [] # list of fragments of atoms, len(fragsList)=number of fragments
@@ -135,6 +136,8 @@ class Pseudoregularize:
                     fragtmp = temp_chn.get_selection(frag_start, frag_end,
                                                      chain=c)
                     if fragtmp:  # make sure not empty
+                        if fragtmp[0].record_name == 'HETATM':
+                            self.got_hetatm = True
                         self.fragsList.append(fragtmp)
                     #self.fragsResRange.append((frag_start, frag_end))
                     #self.frag_ref_CA.append(self.fragsList[-1].get_CAonly())

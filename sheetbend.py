@@ -197,7 +197,7 @@ if nomask:
     #mmap = mapin.copy()
     mmap = ma.make_mask_none(mapin.fullMap.shape)
     #mmap = ma.masked_array(mapin.fullMap, mask=mask_arr)
-    print(mmap)
+    #print(mmap)
     #mmap.fullMap[:] = 1.0
     #print(f"mmap dtype : {mmap.fullMap.dtype}")
     ipmask = mmap.copy()
@@ -616,16 +616,19 @@ if ippdb is None:
 
 
 # write final pdb
-if ippdb is not None:
-    structure.write_to_PDB('{0}_sheetbendfinal.pdb'.format(oppdb.strip('.pdb')),
-                           hetatom=hetatom)
+if oppdb is not None:
+    outfname = '{0}_sheetbendfinal.pdb'.format(oppdb.strip('.pdb'))
+    structure.write_to_PDB(f'{outfname}', hetatom=preg.got_hetatm)
+else:
+    outfname = '{0}_sheetbendfinal.pdb'.format(ippdb.strip('.pdb'))
+    structure.write_to_PDB(f'{outfname}', hetatom=preg.got_hetatm)
 
 # write xml results
 if xmlout is not None:
     f = open(xmlout, 'w')
     for i in range(0, len(results)):
         if i == 0:
-            results[i].write_xml_results_start(f)
+            results[i].write_xml_results_start(f, outfname, ippdb)
         results[i].write_xml_results_cyc(f)
         if i == len(results)-1:
             results[i].write_xml_results_end(f)

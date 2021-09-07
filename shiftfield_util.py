@@ -706,7 +706,7 @@ class ResultsByCycle:
     mdlmapfrac_reso: float
     fscavg: float
     '''
-    def write_xml_results_start(self, f):
+    def write_xml_results_start(self, f, oppdb, ippdb):
         """
         Write the starting lines for XML output
         Arguments:
@@ -714,7 +714,8 @@ class ResultsByCycle:
             file object
         """
         f.write('<SheetbendResult>\n')
-        f.write(' <Title>{0}</Title>\n'.format('temp'))
+        f.write(' <Title>{0}</Title>\n'.format(ippdb))
+        f.write(' <RefinedPDB>{0}</RefinedPDB>\n'.format(oppdb))
         f.write(' <Cycles>\n')
         
     def write_xml_results_end(self, f):
