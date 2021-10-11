@@ -5,10 +5,11 @@
 
 from __future__ import print_function  # python 3 proof
 import sys
+
 #sys.path.append('/home/swh514/Projects/tempy/build/lib')
 try:
-    sys.path.append('/home/swh514/Projects/ccpem_git/ccpem/src/ccpem_core/TEMPy')
-    sys.path.append('/y/people/swh514/Documents/Projects/ccpem_git/ccpem_synced/ccpem/src/ccpem_core')
+    sys.path.append('/home/swh514/Projects/ccpem_git/ccpem/src/ccpem_core')
+    #sys.path.append('/y/people/swh514/Documents/Projects/ccpem_git/ccpem_synced/ccpem/src/ccpem_core')
 except:
     print("can't append")
 '''
@@ -38,13 +39,14 @@ import shiftfield_util as sf_util
 from scipy.interpolate import Rbf, RegularGridInterpolator
 import pseudoregularizer
 import os
-sys.path.append('/home/swh514/Projects/testing_ground')
-sys.path.append('/y/people/swh514/Documents/Projects/sheetbend_python')
-import scale_map.map_scaling as DFM
-
+#sys.path.append('/home/swh514/Projects/testing_ground')
+#sys.path.append('/y/people/swh514/Documents/Projects/sheetbend_python')
+#import scale_map.map_scaling as DFM
+import map_scaling as DFM
+import subprocess
 from sheetbend_cmdln_parser import sheetbendParser
-
-
+from emda import emda_methods
+import mrcfile
 def has_converged(model0, model1, coor_tol, bfac_tol):
     coor_sum_sq = 0
     bfac_sum_sq = 0
@@ -189,7 +191,7 @@ if ipmap is not None:
     ifft_obj = sf_util.plan_ifft(gridshape)
     timelog.end('ifftplan')
 
-if pseudoreg:
+if pseudoreg or mid_pseudoreg:
     print('PSEUDOREGULARIZE')
     preg = pseudoregularizer.Pseudoregularize(original_structure)
 
@@ -294,6 +296,10 @@ if ippdb is not None:
             cmap = map_curreso.copy()
             cmap.fullMap = cmap.fullMap * 0
             cmap = structure.calculate_rho(2.5, mapin, cmap)
+            #cmap.write_to_MRC_file('cmap.map')
+            #with mrcfile.open('cmap.map', mode='r+', permissive=True) as mrc:
+            #    mrc.update_header_from_data()
+            
             #cmap = emc.calc_map_density(map_curreso, structure)
             fltr_cmap = Filter(cmap)
             ftfilter = array_utils.tanh_lowpass(fltr_cmap.fullMap.shape,
@@ -305,8 +311,33 @@ if ippdb is not None:
                 end = timer()
                 print('density calc ', end-start)
             #if verbose > 5 and cyc == 0:
-            #    DFM.write_mapfile(lp_cmap, 'cmap_cyc1.map')
-            #    map_curreso.write_to_MRC_file('mapcurreso_cyc1.map')
+            DFM.write_mapfile(lp_cmap, f'cmap_cyc{cyc+1}.map')
+            DFM.write_mapfile(lp_map, f'mapcurreso_cyc{cyc+1}.map')
+            # try servalcat fofc calc
+            #structure.write_to_PDB('temp_structfile.pdb', hetatom=False)
+            #mapmask_arr = emda_methods.mask_from_map((cell.c, cell.b, cell.a,
+            #                                          cell.gamma, cell.beta,
+            #                                          cell.alpha),
+            #                                         mapin.fullMap)
+            #mapmask_arr = np.flip(mapmask_arr, 1)
+            #emda_methods.write_mrc(mapmask_arr, 'mapmask_emda.map',
+            #                       (cell.a, cell.b, cell.c,
+            #                        cell.alpha, cell.beta, cell.gamma))
+            #mapmask = mapin.copy()
+            #mapmask.fullMap = cmap.fullMap * 0
+            #mapmask.fullMap = mapmask_arr.copy()
+            #mapmask.update_header()
+            #mapmask.write_to_MRC_file('mapmask_emda.map')
+            #fofc_args = f'--model temp_structfile.pdb --resolution {rcyc} '
+            #fofc_args += f'--map {ipmap} --mask mapmask.mrc '
+            #fofc_args += '--normalized_map'
+            #proc1 = subprocess.Popen("servalcat fofc {0}".format(fofc_args),
+            #                         stdout=subprocess.DEVNULL,
+            #                         shell=True)
+            #print('Running servalcat fofc calc')
+            #sys.stdout.flush()
+            #proc1.wait()
+            #diffmapin = mp.readMRC('diffmap_normalized_fofc.mrc')
             #if verbose > 5 and cyc == ncyc-1:
             #    DFM.write_mapfile(lp_cmap, 'cmap_finalcyc.map')
             #    map_curreso.write_to_MRC_file('mapcurreso_final.map')
@@ -383,11 +414,14 @@ if ippdb is not None:
             #                                          gridtree, 2.5)
             #print(np.count_nonzero(mmap.fullMap==0.0))
             # difference map at current reso, mmap
-            #dmap = DFM.get_diffmap12(map_curreso, cmap, rcyc, rcyc)2
+            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
             if verbose >= 1:
                 start = timer()
             timelog.start('DiffMap')
-            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
+            scl_map, scl_cmap, dmap = DFM.get_diffmap12(lp_map, lp_cmap,
+                                                        rcyc, rcyc,
+                                                        cyc=cyc+1,
+                                                        verbose=verbose)
             timelog.end('DiffMap')
             if verbose >= 1:
                 end = timer()
@@ -397,14 +431,17 @@ if ippdb is not None:
             print("REFINE XYZ")
             '''
             cmap.write_to_MRC_file('cmap.map')
+            
             newdmap = Map(np.zeros(dmap.fullMap.shape),
-                        list(dmap.origin),
-                        dmap.apix, 'mapname')
+                          list(dmap.origin),
+                          dmap.apix, 'mapname')
             dmap.set_newmap_data_header(newdmap)
             newdmap.update_header()
-            newdmap.write_to_MRC_file('newdmap.map')
-            mmap.write_to_MRC_file('mmap.map')
+            dmapfname = "newdmap_{0}.map".format(cyc+1)
+            newdmap.write_to_MRC_file(dmapfname)
             '''
+            #mmap.write_to_MRC_file('mmap.map')
+            
             x1map = Map(np.zeros(lp_cmap.fullMap.shape),
                         lp_cmap.origin,
                         lp_cmap.apix,
@@ -417,6 +454,7 @@ if ippdb is not None:
                         lp_cmap.origin,
                         lp_cmap.apix,
                         'mapname',)
+            
             if refxyz:
                 timelog.start('Shiftfield')
                 print(f'maps dtype, lpcmap : {lp_cmap.fullMap.dtype}')
@@ -424,14 +462,25 @@ if ippdb is not None:
                 print(f'dmap dtype : {dmap.fullMap.dtype}')
                 #lp_cmap.fullMap = lp_cmap.fullMap.astype('float64')
                 #dmap.fullMap = dmap.fullMap.astype('float64')
-                x1m, x2m, x3m = shiftfield.shift_field_coord(lp_cmap.fullMap,
+                x1m, x2m, x3m = shiftfield.shift_field_coord(scl_cmap.fullMap,
                                                              dmap.fullMap,
                                                              mmap,
                                                              radcyc, fltr,
                                                              lp_cmap.origin,
                                                              lp_cmap.apix,
                                                              fft_obj,
-                                                             ifft_obj)
+                                                             ifft_obj, cyc+1,
+                                                             verbose=verbose)
+                #x1m, x2m, x3m = shiftfield.shift_field_coord(lp_cmap.fullMap,
+                #                                             dmap.fullMap,
+                #                                             mmap,
+                #                                             radcyc, fltr,
+                #                                             lp_cmap.origin,
+                #                                             lp_cmap.apix,
+                #                                             fft_obj,
+                #                                             ifft_obj, cyc+1,
+                #                                             verbose=verbose)
+                
                 '''
                 x1map, x2map, x3map = shiftfield.shift_field_coord(lp_cmap,
                                                                    dmap, mmap,
@@ -472,12 +521,16 @@ if ippdb is not None:
                     dx, dy, dz = np.matmul(np.array([du[i], dv[i], dw[i]]),
                                            cell.orthmat)
                     if verbose >= 1:
-                        shift_vars.append([du[i], dv[i], dw[i],
+                        shift_vars.append([structure.atomList[i].get_name(),
+                                          structure.atomList[i].get_x(),
+                                          structure.atomList[i].get_y(),
+                                          structure.atomList[i].get_z(),
+                                          du[i], dv[i], dw[i],
                                           dx, dy, dz])
                     structure.atomList[i].translate(dx, dy, dz)
                 timelog.end('UpdateModel')
             
-            if pseudoreg:
+            if mid_pseudoreg:
                 print('PSEUDOREGULARIZE')
                 timelog.start('MIDPSEUDOREG')
                 structure = preg.regularize_frag(structure)
@@ -507,13 +560,13 @@ if ippdb is not None:
                 print('REFINE U ISO')
                 timelog.start('UISO')
                 x1m = shiftfield.shift_field_uiso(lp_cmap.fullMap,
-                                                    dmap.fullMap, mmap,
-                                                    radcyc, fltr,
-                                                    lp_cmap.origin,
-                                                    lp_cmap.apix, fft_obj,
-                                                    ifft_obj,
-                                                    (cell.a,
-                                                     cell.b, cell.c))
+                                                  dmap.fullMap, mmap,
+                                                  radcyc, fltr,
+                                                  lp_cmap.origin,
+                                                  lp_cmap.apix, fft_obj,
+                                                  ifft_obj,
+                                                  (cell.a,
+                                                   cell.b, cell.c))
                 x1map.fullMap = x1m.copy()
                 timelog.end('UISO')
                 timelog.start('Interpolate')
@@ -552,13 +605,14 @@ if ippdb is not None:
             results.append(temp_result)
             if output_intermediate:
                 outname = '{0}_{1}.pdb'.format(oppdb.strip('.pdb'), cyc+1)
-                structure.write_to_PDB(outname, hetatom=hetatom)
-            #if len(shift_vars) != 0:
-            #    outcsv = 'shiftvars1_withorthmat_nplinalg_{0}.csv'.format(cyc+1)
-            #    fopen = open(outcsv, 'w')
-            #    for j in range(0, len(shift_vars)):
-            #        fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
-            #    fopen.close()
+                structure.write_to_PDB(outname, hetatom=False)
+            if len(shift_vars) != 0:
+                outcsv = 'shiftvars1_linalg_{0}.csv'.format(cyc+1)
+                fopen = open(outcsv, 'w')
+                for j in range(0, len(shift_vars)):
+                    fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
+                fopen.close()
+            sys.stdout.flush()
             #if len(shift_U) != 0:
             #    outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
             #    fuiso = open(outusiocsv, 'w')
@@ -620,10 +674,10 @@ if ippdb is None:
 # write final pdb
 if oppdb is not None:
     outfname = '{0}_sheetbendfinal.pdb'.format(oppdb.strip('.pdb'))
-    structure.write_to_PDB(f'{outfname}', hetatom=preg.got_hetatm)
+    structure.write_to_PDB(f'{outfname}', hetatom=False) # preg.got_hetatm
 else:
     outfname = '{0}_sheetbendfinal.pdb'.format(ippdb.strip('.pdb'))
-    structure.write_to_PDB(f'{outfname}', hetatom=preg.got_hetatm)
+    structure.write_to_PDB(f'{outfname}', hetatom=False)
 
 # write xml results
 if xmlout is not None:

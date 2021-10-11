@@ -11,7 +11,7 @@ import numpy as np
 from timeit import default_timer as timer
 from numba import njit
 from math import fabs
-
+from TEMPy.EMMap import Map
 from numpy import linalg
 #from numpy.linalg.linalg import solve
 import numpy.ma as ma
@@ -210,7 +210,7 @@ def mapfilter(data_arr, fltr_data_r, scale, fft_obj, ifft_obj, g_sam, g_reci):
     # inverse fft
     #if self.verbose >= 1:
     #    start = timer()
-    print(data_r.dtype, data_c.dtype)
+    #print(data_r.dtype, data_c.dtype)
     data_c = data_c.conjugate().copy()
     data_r = ifft_obj(data_c, data_r)
     #if self.verbose >= 1:
@@ -317,8 +317,17 @@ def cor_mod(a, b):
   
 #  return v
 
+def writeMap(data_array, origin, apix, shape, fname):
+    mapobj = Map(np.zeros((shape[2], shape[1], shape[0])),
+                 origin,
+                 apix[0],
+                 'mapname',)
+    mapobj.fullMap = data_array.copy()
+    mapobj.update_header()
+    mapobj.write_to_MRC_file(fname)
+
 def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
-                      fft_obj, ifft_obj, verbose=0):
+                      fft_obj, ifft_obj, cyc, verbose=0):
     """
     Returns 3 map instances for shifts in x,y,z directions
     Performs shift field refinement on coordinates.
@@ -342,8 +351,9 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     """
     # set the numbers for the grids in list form
     g_reci = (cmap.shape[2], cmap.shape[1], cmap.shape[0]//2+1)
-    g_real = (g_reci[0], g_reci[1], int(g_reci[2]-1)*2)
-    ch = (g_real[0]//2, g_real[1]//2, g_real[2]//2+1)
+    #g_real = (g_reci[0], g_reci[1], int(g_reci[2]-1)*2)
+    g_real = (cmap.shape[2], cmap.shape[1], cmap.shape[0])
+    ch = (g_real[0]//2, g_real[1]//2, g_real[2]//2)
     
     # calculate map coefficients
     data_r = cmap
@@ -382,34 +392,20 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
         end = timer()
         print('first ifft ', end-start)
     ydata_r = ifft_obj(ydata_c, ydata_r)
-    xdata_r = ifft_obj(xdata_c, xdata_r)    
-    '''x1map = Map(np.zeros(cmap.fullMap.shape),
-                cmap.origin,
-                cmap.apix,
-                'mapname',)
-    x2map = Map(np.zeros(cmap.fullMap.shape),
-                cmap.origin,
-                cmap.apix,
-                'mapname',)
-    x3map = Map(np.zeros(cmap.fullMap.shape),
-                cmap.origin,
-                cmap.apix,
-                'mapname',)
-    print(x1map.apix, x2map.apix, x3map.apix)
-    print(x1map.origin, x2map.origin, x3map.origin)
-    x1map.update_header()
-    x2map.update_header()
-    x3map.update_header()'''
+    xdata_r = ifft_obj(xdata_c, xdata_r)
+    if verbose >= 6:
+        writeMap(xdata_r, origin, apix, cmap.shape, f'gradx1map_{cyc}.map')    
+        writeMap(ydata_r, origin, apix, cmap.shape, f'gradx2map_{cyc}.map')    
+        writeMap(zdata_r, origin, apix, cmap.shape, f'gradx3map_{cyc}.map')
+
+    #print(x1map.apix, x2map.apix, x3map.apix)
+    #print(x1map.origin, x2map.origin, x3map.origin)
     # copy map
     x1map_r = xdata_r.copy()
     x2map_r = ydata_r.copy()
     x3map_r = zdata_r.copy()
     # end map preparation
-    '''
-    x1map.write_to_MRC_file('x1map_1.map')
-    x2map.write_to_MRC_file('x2map_1.map')
-    x3map.write_to_MRC_file('x3map_1.map')
-    '''
+    
     # calculate XTY and apply mask
     # ymap=diffmap , mmap = mask
     #ymap = np.zeros(dmap.shape)
@@ -431,14 +427,24 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     
     # print(np.count_nonzero(y1map==0.0), np.count_nonzero(y2map==0.0), np.count_nonzero(y3map==0.0))
     # calculate XTX  (removed multiply with mask)
-    x11map = x1map_m*x1map_m
+    x11map = x1map_r*x1map_r
     # print(np.array_equal(x11map, x1map.fullMap))
-    # was  x12map = x1map_r*x2map_r    
-    x12map = x1map_m*x2map_m
-    x13map = x1map_m*x3map_m
-    x22map = x2map_m*x2map_m
-    x23map = x2map_m*x3map_m
-    x33map = x3map_m*x3map_m
+    # was  x12map = x1map_r*x2map_r
+    x12map = x1map_r*x2map_r
+    x13map = x1map_r*x3map_r
+    x22map = x2map_r*x2map_r
+    x23map = x2map_r*x3map_r
+    x33map = x3map_r*x3map_r
+    if verbose >= 6:
+        writeMap(x11map, origin, apix, cmap.shape, f'x11map_{cyc}.map')
+        writeMap(x12map, origin, apix, cmap.shape, f'x12map_{cyc}.map')
+        writeMap(x13map, origin, apix, cmap.shape, f'x13map_{cyc}.map')
+        writeMap(x22map, origin, apix, cmap.shape, f'x22map_{cyc}.map')
+        writeMap(x23map, origin, apix, cmap.shape, f'x23map_{cyc}.map')
+        writeMap(x33map, origin, apix, cmap.shape, f'x33map_{cyc}.map')
+        writeMap(y1map, origin, apix, cmap.shape, f'y1map_{cyc}.map')
+        writeMap(y2map, origin, apix, cmap.shape, f'y2map_{cyc}.map')
+        writeMap(y3map, origin, apix, cmap.shape, f'y3map_{cyc}.map')
     #y1map = y1map.astype('float32')
     #y2map = y2map.astype('float32')
     #y3map = y3map.astype('float32')
@@ -476,6 +482,16 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     x33map = mapfilter(x33map, fltr_data_r, scale, fft_obj, ifft_obj, g_real,
                        g_reci)
     end = timer()
+    if verbose >= 6:
+        writeMap(x11map, origin, apix, cmap.shape, f'filt_x11map_{cyc}.map')
+        writeMap(x12map, origin, apix, cmap.shape, f'filt_x12map_{cyc}.map')
+        writeMap(x13map, origin, apix, cmap.shape, f'filt_x13map_{cyc}.map')
+        writeMap(x22map, origin, apix, cmap.shape, f'filt_x22map_{cyc}.map')
+        writeMap(x23map, origin, apix, cmap.shape, f'filt_x23map_{cyc}.map')
+        writeMap(x33map, origin, apix, cmap.shape, f'filt_x33map_{cyc}.map')
+        writeMap(y1map, origin, apix, cmap.shape, f'filt_y1map_{cyc}.map')
+        writeMap(y2map, origin, apix, cmap.shape, f'filt_y2map_{cyc}.map')
+        writeMap(y3map, origin, apix, cmap.shape, f'filt_y3map_{cyc}.map')
     print('Filter maps : {0} s'.format(end-start))
     
     #x33map1.fullMap = x33map
@@ -620,7 +636,7 @@ def shift_field_uiso(cmap, dmap, mmap, rad, fltr, origin, apix, fft_obj,
     """
     g_reci = (cmap.shape[2], cmap.shape[1], cmap.shape[0]//2+1)
     g_real = (g_reci[0], g_reci[1], int(g_reci[2]-1)*2)
-    ch = (g_real[0]//2, g_real[1]//2, g_real[2]//2+1)
+    ch = (g_real[0]//2, g_real[1]//2, g_real[2]//2)
     # fullMap is numpy array
     data_r = cmap
     if verbose >= 1:
@@ -632,7 +648,7 @@ def shift_field_uiso(cmap, dmap, mmap, rad, fltr, origin, apix, fft_obj,
         print('first ft ', end-start)
     # calculate gradient map coefficients
     data_c = gradient_map_iso_calc(data_c, g_reci, g_real,
-                                                      ch, g_cell)
+                                   ch, g_cell)
     '''for cz in range(0, g_reci_[0]):    # z
         for cy in range(0, g_reci_[1]):     # y
             for cx in range(0, g_reci_[2]):    # x

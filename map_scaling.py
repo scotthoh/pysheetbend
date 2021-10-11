@@ -59,7 +59,8 @@ def write_mapfile(mapobj, map_path):
 
 
 def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
-                  flag_filt=False, refsc=False, randsize=0.1, flag_dust=False):
+                  flag_filt=False, refsc=False, randsize=0.1, flag_dust=False,
+                  cyc=0, verbose=0):
     if emmap2.__class__.__name__ == 'Map':
         print('filtermap')
         #emmap2 = MapEdit(emmap2)
@@ -149,6 +150,8 @@ def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
 
         # store scaled map1
         scaledmap1 = diff1.copy(deep=True)
+        # store scaled map2
+        scaledmap2 = diff2.copy(deep=True)
         #calculate difference map 1
         diff1.fullMap = (diff1.fullMap - diff2.fullMap)
 
@@ -166,11 +169,13 @@ def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
         #write difference maps
         diff1ingrid = diff1.copy(deep=False)
         diff2ingrid = diff2.copy(deep=False)
-        #mapout1 = 'test_diff1_1.map' #.format(outdir)
+        if verbose >= 6:
+            mapout1 = 'test_diff1_{0}.map'.format(cyc)  #.format(outdir)
+            write_mapfile(diff1ingrid, mapout1)
+        
         #mapout2 = 'test_diff1_2.map' #.format(outdir)
-        #write_mapfile(diff1ingrid, mapout1)
         #write_mapfile(diff2ingrid, mapout2)
-        return diff1ingrid
+        return scaledmap1, scaledmap2, diff1ingrid
     else:
         print("different spacing")
 
@@ -281,21 +286,52 @@ def get_diffmap(mapin1, pdbin, res1, res2, plot=False, debug=False):
 
 
 if __name__ == '__main__':
+    from TEMPy.StructureParser import PDBParser
+    from TEMPy.mapprocess import array_utils
 
-    sys.path.append("/home/swh514/Projects/testing_ground")
+    #sys.path.append("/home/swh514/Projects/testing_ground")
     #import electron_scattering_factor as esf
-    import esf_map_calc as esf
-    outdir = '/home/swh514/Projects/testing_ground/scale_map/test4'
+    #import esf_map_calc as esf
+    #outdir = '/home/swh514/Projects/testing_ground/scale_map/test4'
     mapin1 = '/home/swh514/Projects/data/EMD-3488/map/emd_3488.map'
-    pdbin = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent'
+    mapin1 = '/home/swh514/Projects/sheetbend_python_git/AF_mr_refine_kakashi/AF-Q86YT5-F1-model_v1/emd_22457.map'
+    pdbin = '/home/swh514/Projects/sheetbend_python_git/AF_mr_refine_kakashi/AF-Q86YT5-F1-model_v1/FULL/molrep.pdb'
+    res1 = 6.0
+    res2 = 6.0
+    cyc = 2
     plot_spectra = True
     debug = True
-    emmap1 = readmap(mapin1)
+    #emmap1 = readmap(mapin1)
     inmap1 = MapParser.readMRC(mapin1)
-    emmap2 = esf.main(inmap1, pdbin)
+    structure = PDBParser.read_PDB_file('test',
+                                        pdbin,
+                                        hetatm=False,
+                                        water=False)
+    emmap2 = inmap1.copy()
+    emmap2.fullMap = emmap2.fullMap * 0
+    emmap2 = structure.calculate_rho(2.5, inmap1, emmap2)
+    #emmap2 = esf.main(inmap1, pdbin)
     #write_mapfile(emmap2, '{0}/pdbin_emmap2.map'.format(outdir))
-    
-    if emmap2.__class__.__name__ == 'Map':
+    fltrmap = Filter(inmap1)
+    # frequency from 0:0.5, 0.1 =10Angs, 0.5 = 2Angs ? or apix dependent?
+    # 1/Angs = freq or apix/reso = freq?
+    print(f'filtermap dtype : {fltrmap.fullMap.dtype}')
+    ftfilter = array_utils.tanh_lowpass(fltrmap.fullMap.shape,
+                                        inmap1.apix/res1, fall=0.5)
+    lp_map = fltrmap.fourier_filter(ftfilter=ftfilter,
+                                    inplace=False)
+    lp_map.set_apix_tempy()
+    fltr_cmap = Filter(emmap2)
+    ftfilter = array_utils.tanh_lowpass(fltr_cmap.fullMap.shape,
+                                        inmap1.apix/res1, fall=0.5)
+    lp_cmap = fltr_cmap.fourier_filter(ftfilter=ftfilter,
+                                       inplace=False)
+
+    diffmap = get_diffmap12(inmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
+                            flag_filt=False, refsc=False, randsize=0.1, flag_dust=False, cyc=cyc)
+    mapout1 = 'test_diff1_{0}.map'.format(cyc)  #.format(outdir)
+    write_mapfile(diffmap, mapout1)
+    '''if emmap2.__class__.__name__ == 'Map':
         print('filtermap')
         emmap2 = Filter(emmap2)
         emmap2.set_apix_as_tuple()
@@ -388,4 +424,4 @@ if __name__ == '__main__':
         #write_mapfile(diff2ingrid, mapout2)
     else:
         print("different spacing")
-        
+    '''
