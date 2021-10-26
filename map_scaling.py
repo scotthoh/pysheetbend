@@ -59,7 +59,7 @@ def write_mapfile(mapobj, map_path):
 
 
 def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
-                  flag_filt=False, refsc=False, randsize=0.1, flag_dust=False,
+                  lpfiltb=False, refsc=False, randsize=0.1, flag_dust=False,
                   cyc=0, verbose=0):
     if emmap2.__class__.__name__ == 'Map':
         print('filtermap')
@@ -67,7 +67,9 @@ def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
         emmap2 = Filter(emmap2)
         emmap2.set_apix_as_tuple()
         #emmap2.fix_origin()
-
+    elif emmap2.__class__.__name__ == 'Filter':
+        if not isinstance(emmap1.apix, tuple):
+            emmap2.set_apix_as_tuple()
     print(emmap1.apix)
     if emmap1.__class__.__name__ == 'Map':
         print('filtermap')
@@ -77,7 +79,7 @@ def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
     elif emmap1.__class__.__name__ == 'Filter':
         if not isinstance(emmap1.apix, tuple):
             emmap1.set_apix_as_tuple()
-            
+    print(f'{emmap1.apix}, {emmap2.apix}')
     #rite_mapfile(emmap2, '{0}/pdbin_emmap2.map'.format(outdir))
     #print('in map scaling, {0}'.format(str(emmap2.fullMap.dtype)))
     if res1 > 4.0:
@@ -129,7 +131,10 @@ def get_diffmap12(emmap1, emmap2, res1, res2, plot_spectra=False, debug=False,
     #assuming same grid
     if samegrid:
         diff1, diff2, dict_plot = mapcompare.amplitude_match(emmap1, emmap2,
-                                reso=max(res1,res2), lpfiltb=flag_filt, ref=refsc)
+                                                             reso=max(res1,
+                                                                      res2),
+                                                             lpfiltb=lpfiltb,
+                                                             ref=refsc)
     
         #if plot_spectra:
         #    pl = Plot()

@@ -96,10 +96,10 @@ class GridDimension:
         self.grid_sam = densMap.fullMap.shape
         self.g_reci = (densMap.z_size(), densMap.y_size(),
                        densMap.x_size()//2+1)
-        self.g_real = (self.g_reci[0], self.g_reci[1],
-                       int(self.g_reci[2]-1)*2)
+        self.g_real = (densMap.z_size(), densMap.y_size(),
+                       densMap.x_size())
         self.g_half = (densMap.z_size()//2, densMap.y_size()//2,
-                       densMap.x_size()//2+1)
+                       densMap.x_size()//2)
 
 
 def plan_fft(grid_dim):

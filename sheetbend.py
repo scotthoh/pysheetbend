@@ -6,6 +6,8 @@
 from __future__ import print_function  # python 3 proof
 import sys
 
+from scipy.ndimage.measurements import maximum
+
 #sys.path.append('/home/swh514/Projects/tempy/build/lib')
 try:
     sys.path.append('/home/swh514/Projects/ccpem_git/ccpem/src/ccpem_core')
@@ -43,10 +45,8 @@ import os
 #sys.path.append('/y/people/swh514/Documents/Projects/sheetbend_python')
 #import scale_map.map_scaling as DFM
 import map_scaling as DFM
-import subprocess
 from sheetbend_cmdln_parser import sheetbendParser
-from emda import emda_methods
-import mrcfile
+import datetime
 def has_converged(model0, model1, coor_tol, bfac_tol):
     coor_sum_sq = 0
     bfac_sum_sq = 0
@@ -66,6 +66,7 @@ def has_converged(model0, model1, coor_tol, bfac_tol):
 
 
 # Parse command line input
+print(f'Started at {datetime.datetime.now()}')
 SP = sheetbendParser()
 SP.get_args()
 # Set variables from parsed arguments
@@ -97,10 +98,11 @@ verbose = SP.args.verbose  # 0
 ncycrr = 1  # refine-regularise-cycle
 fltr = 2  # quadratic filter
 hetatom = True
+hetatm_present = False
 biso_range = SP.args.biso_range
 #ulo = sf_util.b2u(biso_range[0])
 #uhi = sf_util.b2u(biso_range[1])
-mid_pseudoreg = True
+mid_pseudoreg = False #True
 timelog = sf_util.Profile()
 SP.print_args()
 # defaults
@@ -169,11 +171,18 @@ if ippdb is not None:
 
     #original_structure = structure.copy()
     structure = BioPy_Structure(new_reordered_struct)
+    for atm in structure.atomList:
+        if atm.record_name == 'HETATM':
+            hetatm_present = True
+            break
     original_structure = structure.copy()
 # read map
 if ipmap is not None:
     mapin = mp.readMRC(ipmap)
-    print(f"mapin dtype : {mapin.fullMap.dtype}")
+    apix0 = mapin.apix
+    ori0 = mapin.origin
+    #print(f"mapin dtype : {mapin.fullMap.dtype}")
+    #mapin.write_to_MRC_file('mapin_after_read.map')
     scorer = ScoringFunctions()
     SB = StructureBlurrer()
     # gridtree = SB.maptree(mapin)
@@ -190,6 +199,20 @@ if ipmap is not None:
     timelog.start('ifftplan')
     ifft_obj = sf_util.plan_ifft(gridshape)
     timelog.end('ifftplan')
+    if isinstance(apix0, tuple):
+        nyquist_res = maximum([2.0*apix0[i] for i in (0, 1, 2)])
+        max_apix = maximum(apix0)
+        if res > 0.0 and res > nyquist_res:
+            samp_rate = res/(2*max_apix)
+        else:
+            samp_rate = 1.5  # using res = nyquist_res
+    else:
+        nyquist_res = 2*apix0
+        if res > 0.0 and res > nyquist_res:
+            samp_rate = res/(2*apix0)
+        else:
+            samp_rate = 1.5
+        
 
 if pseudoreg or mid_pseudoreg:
     print('PSEUDOREGULARIZE')
@@ -210,7 +233,7 @@ if ipmask is None:
     timelog.start('MaskMap')
     fltrmap = Filter(mapin)
     ftfilter = array_utils.tanh_lowpass(fltrmap.fullMap.shape,
-                                        mapin.apix/15.0,
+                                        apix0/15.0,
                                         fall=1)
     print('fullmap {0}, fltr {1} '.format(fltrmap.fullMap.shape, ftfilter.shape)) 
     lp_maskin = fltrmap.fourier_filter(ftfilter=ftfilter,
@@ -225,19 +248,25 @@ if ipmask is None:
     mmap.fullMap = (soft_mask_arr > mapt) * 1.0
     mmap.update_header()
     timelog.end('MaskMap')
+elif not nomask:
+    maskin = mp.readMRC(ipmask)
+    mmap = ma.make_mask(maskin)
+    # invert the values for numpy masked_array, true is masked/invalid, false is valid
+    mmap = ~mmap
 
 # CASE 1:
 # Refine model against EM data
 if ippdb is not None:
     print('Refine Model against EM data')
     # calculate input map threshold/contour
-    mapin_t = scorer.calculate_map_threshold(mapin)
+    '''mapin_t = scorer.calculate_map_threshold(mapin)
     zg = np.linspace(0, mapin.z_size(), num=mapin.z_size(),
                      endpoint=False)
     yg = np.linspace(0, mapin.y_size(), num=mapin.y_size(),
                      endpoint=False)
     xg = np.linspace(0, mapin.x_size(), num=mapin.x_size(),
                      endpoint=False)
+    '''
     for cycrr in range(0, ncycrr):
         print('\nRefine-regularise cycle: {0}\n'.format(cycrr+1))
         # previously: loop over cycles
@@ -269,50 +298,122 @@ if ippdb is not None:
             print('\nCycle: {0}   Resolution: {1}   Radius: {2}\n'
                   .format(cyc+1, rcyc, radcyc))
 
-            # truncate resolution - low pass filter
-            # spherical tophat function fall=0.01 tophat
-            fltrmap = Filter(mapin)
-            # frequency from 0:0.5, 0.1 =10Angs, 0.5 = 2Angs ? or apix dependent?
-            # 1/Angs = freq or apix/reso = freq?
-            print(f'filtermap dtype : {fltrmap.fullMap.dtype}')
-            ftfilter = array_utils.tanh_lowpass(fltrmap.fullMap.shape,
-                                                mapin.apix/rcyc, fall=0.5)
-            lp_map = fltrmap.fourier_filter(ftfilter=ftfilter,
-                                            inplace=False)
-            lp_map.set_apix_tempy()
-            map_curreso = Map(lp_map.fullMap, lp_map.origin,
-                              lp_map.apix, mapin.filename)
-            if verbose > 5:
-                print(lp_map.__class__.__name__)
-                print(lp_map.apix)
-                print(map_curreso.__class__.__name__)
-                print(map_curreso.apix)
+            # downsample maps
+            # changes 22-25 Oct 21 downsampling maps (coarser grids),
+            # larger pixel size/spacing used. res/(2*samprate) = min spacing,
+            # samp rate default = 1.5 ; took gemmi code
+            # faster overall; but should be able to optimize more by calculating
+            # better gridshapes.
+            # don't have to use lowpass as it doesn't affect results much
+            spacing = rcyc/(2*samp_rate)
+
+            downsamp_map = mapin.downsample_map(spacing)
+            downsamp_map.update_header()
+            downsamp_shape = downsamp_map.fullMap.shape
+            downsamp_apix = downsamp_map.apix
+
+            mmap = ma.make_mask_none(downsamp_shape)
+            zg = np.linspace(0, downsamp_map.z_size(),
+                             num=downsamp_map.z_size(),
+                             endpoint=False)
+            yg = np.linspace(0, downsamp_map.y_size(),
+                             num=downsamp_map.y_size(),
+                             endpoint=False)
+            xg = np.linspace(0, downsamp_map.x_size(),
+                             num=downsamp_map.x_size(),
+                             endpoint=False)
             
-            # Calculate electron density with b-factors from input model
+            gridshape = sf_util.GridDimension(downsamp_map)
+            timelog.start('fftplan')
+            fft_obj = sf_util.plan_fft(gridshape)
+            timelog.end('fftplan')
+
+            timelog.start('ifftplan')
+            ifft_obj = sf_util.plan_ifft(gridshape)
+            timelog.end('ifftplan')
+            print(f'downsample shape : {downsamp_shape}')
+            print(f'downsample apix : {downsamp_apix}')
             if verbose >= 1:
                 start = timer()
             timelog.start('MapDensity')
 
-            cmap = map_curreso.copy()
+            cmap = downsamp_map.copy()
             cmap.fullMap = cmap.fullMap * 0
-            cmap = structure.calculate_rho(2.5, mapin, cmap)
+            cmap = structure.calculate_rho(2.5, downsamp_map, cmap)
+            timelog.end('MapDensity')
+            if verbose >= 1:
+                end = timer()
+                print('density calc ', end-start)
+            
+            # calculate difference map
+            # truncate resolution - low pass filter; lpfiltb = True
+            # spherical tophat function fall=0.01 tophat
+            #if verbose >= 1:
+            #    start = timer()
+            #timelog.start('DiffMap')
+            
+            scl_map, scl_cmap, dmap = DFM.get_diffmap12(downsamp_map, cmap,
+                                                        rcyc, rcyc,
+                                                        cyc=cyc+1,
+                                                        lpfiltb=False,
+                                                        verbose=verbose)
+            timelog.end('DiffMap')
+            if verbose >= 1:
+                end = timer()
+                print('Diff map calc: {0} s '.format(end-start))
+            
+
+            #fltrmap = Filter(downsamp_map) #mapin)
+            #print(f'fltrmap apix : {fltrmap.apix}')
+            #fltrmap.apix = apix0
+            # frequency from 0:0.5, 0.1 =10Angs, 0.5 = 2Angs ? or apix dependent?
+            # 1/Angs = freq or apix/reso = freq?
+            # print(f'filtermap dtype : {fltrmap.fullMap.dtype}')
+            #ftfilter = array_utils.tanh_lowpass(downsamp_shape,   #fltrmap.fullMap.shape,
+            #                                    downsamp_apix/rcyc, fall=0.2)
+            #lp_map = fltrmap.fourier_filter(ftfilter=ftfilter,
+            #                                inplace=False)
+            #print(f'check apix lpmap {lp_map.apix}')
+            #lp_map.set_apix_tempy()
+            #lp_map.apix = apix0
+            #map_curreso = Map(downsamp_map.fullMap, ori0,
+            #                  downsamp_apix, mapin.filename)
+            if verbose >= 5:
+                print('check apix')
+                print(mapin.__class__.__name__)
+                print(mapin.apix)
+                print(scl_map.__class__.__name__)
+                print(scl_map.apix)
+                print(scl_cmap.__class__.__name__)
+                print(scl_cmap.apix)
+            
+            # Calculate electron density with b-factors from input model
+            #if verbose >= 1:
+            #    start = timer()
+            #timelog.start('MapDensity')
+
+            #cmap = map_curreso.copy()
+            #cmap.fullMap = cmap.fullMap * 0
+            #cmap = structure.calculate_rho(2.5, downsamp_map, cmap)
             #cmap.write_to_MRC_file('cmap.map')
             #with mrcfile.open('cmap.map', mode='r+', permissive=True) as mrc:
             #    mrc.update_header_from_data()
             
             #cmap = emc.calc_map_density(map_curreso, structure)
-            fltr_cmap = Filter(cmap)
-            ftfilter = array_utils.tanh_lowpass(fltr_cmap.fullMap.shape,
-                                                mapin.apix/rcyc, fall=0.5)
-            lp_cmap = fltr_cmap.fourier_filter(ftfilter=ftfilter,
-                                               inplace=False)
-            timelog.end('MapDensity')
-            if verbose >= 1:
-                end = timer()
-                print('density calc ', end-start)
+            #fltr_cmap = Filter(cmap)
+            #fltr_cmap.apix = apix0
+            #ftfilter = array_utils.tanh_lowpass(downsamp_shape,
+            #                                    downsamp_apix/rcyc, fall=0.2)
+            #lp_cmap = fltr_cmap.fourier_filter(ftfilter=ftfilter,
+            #                                   inplace=False)
+            #timelog.end('MapDensity')
+            #if verbose >= 1:
+            #    end = timer()
+            #    print('density calc ', end-start)
             #if verbose > 5 and cyc == 0:
-            DFM.write_mapfile(lp_cmap, f'cmap_cyc{cyc+1}.map')
-            DFM.write_mapfile(lp_map, f'mapcurreso_cyc{cyc+1}.map')
+            DFM.write_mapfile(scl_cmap, f'cmap_cyc{cyc+1}.map')
+            DFM.write_mapfile(scl_map, f'mapcurreso_cyc{cyc+1}.map')
+            #mapin.write_to_MRC_file('mapin.map')
             # try servalcat fofc calc
             #structure.write_to_PDB('temp_structfile.pdb', hetatom=False)
             #mapmask_arr = emda_methods.mask_from_map((cell.c, cell.b, cell.a,
@@ -346,12 +447,14 @@ if ippdb is not None:
             # like refmac might take too much?
             if verbose >= 1:
                 start = timer()
+            
             timelog.start('Scoring')
             # calculate map contour
-            mapcurreso_t = scorer.calculate_map_threshold(map_curreso)
+            dmapin_t = scorer.calculate_map_threshold(downsamp_map)
+            mapcurreso_t = scorer.calculate_map_threshold(scl_map)
             print('Calculated input map volume threshold is ', end='')
             print('{0:.2f} and {1:.2f} (current resolution).'
-                  .format(mapin_t, mapcurreso_t))
+                  .format(dmapin_t, mapcurreso_t))
 
             # calculate model contour
             t = 2.5 if rcyc > 10.0 else 2.0 if rcyc > 6.0 else 1.5
@@ -362,16 +465,18 @@ if ippdb is not None:
             else:
                 t = 1.5'''
             cmap_t = 1.5*cmap.std()
-            fltrcmap_t = t*np.std(lp_cmap.fullMap)
+            #fltrcmap_t = t*scl_cmap.std() #np.std(scl_cmap.fullMap)
+            fltrcmap_t = scorer.calculate_map_threshold(scl_cmap)
             print('Calculated model threshold is ', end='')
             print('{0:.2f} and {1:.2f} (current resolution)'
                   .format(cmap_t, fltrcmap_t))
 
-            ovl_map1, ovl_mdl1 = scorer.calculate_overlap_scores(mapin, cmap,
-                                                                 mapin_t,
+            ovl_map1, ovl_mdl1 = scorer.calculate_overlap_scores(downsamp_map,
+                                                                 cmap,
+                                                                 dmapin_t,
                                                                  cmap_t)
-            ovl_map2, ovl_mdl2 = scorer.calculate_overlap_scores(map_curreso,
-                                                                 lp_cmap,
+            ovl_map2, ovl_mdl2 = scorer.calculate_overlap_scores(scl_map,
+                                                                 scl_cmap,
                                                                  mapcurreso_t,
                                                                  fltrcmap_t)
             timelog.end('Scoring')
@@ -414,18 +519,18 @@ if ippdb is not None:
             #                                          gridtree, 2.5)
             #print(np.count_nonzero(mmap.fullMap==0.0))
             # difference map at current reso, mmap
-            dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
-            if verbose >= 1:
-                start = timer()
-            timelog.start('DiffMap')
-            scl_map, scl_cmap, dmap = DFM.get_diffmap12(lp_map, lp_cmap,
-                                                        rcyc, rcyc,
-                                                        cyc=cyc+1,
-                                                        verbose=verbose)
-            timelog.end('DiffMap')
-            if verbose >= 1:
-                end = timer()
-                print('Diff map calc: {0} s '.format(end-start))
+            #dmap = DFM.get_diffmap12(lp_map, lp_cmap, rcyc, rcyc)
+            #if verbose >= 1:
+            #    start = timer()
+            #timelog.start('DiffMap')
+            #scl_map, scl_cmap, dmap = DFM.get_diffmap12(lp_map, lp_cmap,
+            #                                            rcyc, rcyc,
+            #                                            cyc=cyc+1,
+            #                                            verbose=verbose)
+            #timelog.end('DiffMap')
+            #if verbose >= 1:
+            #    end = timer()
+            #    print('Diff map calc: {0} s '.format(end-start))
             # xyz shiftfield refine pass in cmap, dmap, mmap, x1map, x2map,
             # x3map, radcyc, fltr, fftobj, iffobj
             print("REFINE XYZ")
@@ -442,22 +547,22 @@ if ippdb is not None:
             '''
             #mmap.write_to_MRC_file('mmap.map')
             
-            x1map = Map(np.zeros(lp_cmap.fullMap.shape),
-                        lp_cmap.origin,
-                        lp_cmap.apix,
+            x1map = Map(np.zeros(scl_cmap.fullMap.shape),
+                        scl_cmap.origin,
+                        downsamp_apix,
                         'mapname',)
-            x2map = Map(np.zeros(lp_cmap.fullMap.shape),
-                        lp_cmap.origin,
-                        lp_cmap.apix,
+            x2map = Map(np.zeros(scl_cmap.fullMap.shape),
+                        scl_cmap.origin,
+                        downsamp_apix,
                         'mapname',)
-            x3map = Map(np.zeros(lp_cmap.fullMap.shape),
-                        lp_cmap.origin,
-                        lp_cmap.apix,
+            x3map = Map(np.zeros(scl_cmap.fullMap.shape),
+                        scl_cmap.origin,
+                        downsamp_apix,
                         'mapname',)
             
             if refxyz:
                 timelog.start('Shiftfield')
-                print(f'maps dtype, lpcmap : {lp_cmap.fullMap.dtype}')
+                print(f'maps dtype, lpcmap : {scl_cmap.fullMap.dtype}')
                 #print(f'mmap dtype : {mmap.fullMap.dtype}')
                 print(f'dmap dtype : {dmap.fullMap.dtype}')
                 #lp_cmap.fullMap = lp_cmap.fullMap.astype('float64')
@@ -466,8 +571,8 @@ if ippdb is not None:
                                                              dmap.fullMap,
                                                              mmap,
                                                              radcyc, fltr,
-                                                             lp_cmap.origin,
-                                                             lp_cmap.apix,
+                                                             ori0,
+                                                             downsamp_apix,
                                                              fft_obj,
                                                              ifft_obj, cyc+1,
                                                              verbose=verbose)
@@ -510,7 +615,7 @@ if ippdb is not None:
                                                     x3map.fullMap)
 
                 count = 0
-                v = structure.map_grid_position_array(map_curreso, False)
+                v = structure.map_grid_position_array(scl_map, False)
                 v = np.flip(v, 1)
                 du = 2.0*interp_x1(v)
                 dv = 2.0*interp_x2(v)
@@ -559,11 +664,11 @@ if ippdb is not None:
             if refuiso and lastcyc:
                 print('REFINE U ISO')
                 timelog.start('UISO')
-                x1m = shiftfield.shift_field_uiso(lp_cmap.fullMap,
+                x1m = shiftfield.shift_field_uiso(scl_cmap.fullMap,
                                                   dmap.fullMap, mmap,
                                                   radcyc, fltr,
-                                                  lp_cmap.origin,
-                                                  lp_cmap.apix, fft_obj,
+                                                  ori0,
+                                                  downsamp_apix, fft_obj,
                                                   ifft_obj,
                                                   (cell.a,
                                                    cell.b, cell.c))
@@ -572,7 +677,7 @@ if ippdb is not None:
                 timelog.start('Interpolate')
                 interp_x1 = RegularGridInterpolator((zg, yg, xg),
                                                     x1map.fullMap)
-                v = structure.map_grid_position_array(map_curreso, False)
+                v = structure.map_grid_position_array(scl_map, False)
                 v = np.flip(v, 1)
                 du = 1.0*interp_x1(v)
                 db = sf_util.u2b(du)
@@ -605,7 +710,7 @@ if ippdb is not None:
             results.append(temp_result)
             if output_intermediate:
                 outname = '{0}_{1}.pdb'.format(oppdb.strip('.pdb'), cyc+1)
-                structure.write_to_PDB(outname, hetatom=False)
+                structure.write_to_PDB(outname, hetatom=hetatm_present)
             if len(shift_vars) != 0:
                 outcsv = 'shiftvars1_linalg_{0}.csv'.format(cyc+1)
                 fopen = open(outcsv, 'w')
@@ -674,10 +779,10 @@ if ippdb is None:
 # write final pdb
 if oppdb is not None:
     outfname = '{0}_sheetbendfinal.pdb'.format(oppdb.strip('.pdb'))
-    structure.write_to_PDB(f'{outfname}', hetatom=False) # preg.got_hetatm
+    structure.write_to_PDB(f'{outfname}', hetatom=hetatm_present) # preg.got_hetatm
 else:
     outfname = '{0}_sheetbendfinal.pdb'.format(ippdb.strip('.pdb'))
-    structure.write_to_PDB(f'{outfname}', hetatom=False)
+    structure.write_to_PDB(f'{outfname}', hetatom=hetatm_present)
 
 # write xml results
 if xmlout is not None:
@@ -690,6 +795,7 @@ if xmlout is not None:
             results[i].write_xml_results_end(f)
     f.close()
 
+print(f'Ended at {datetime.datetime.now()}')
 timelog.profile_log()
 
 # need to use ccpem python tempy for the diff map

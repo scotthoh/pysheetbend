@@ -28,9 +28,9 @@ def fltr(r, radius, function=2):
     """
     if r < radius:
         if function == 2:
-            return pow((1.0-r)/radius, 2)
+            return pow(1.0-r/radius, 2)
         elif function == 1:
-            return (1.0-r)/radius
+            return 1.0-r/radius
         elif function == 0:
             return 1.0
     else:
@@ -317,16 +317,16 @@ def cor_mod(a, b):
   
 #  return v
 
-def writeMap(data_array, origin, apix, shape, fname):
+def writeMap(data_array, origin, apix0, shape, fname):
     mapobj = Map(np.zeros((shape[2], shape[1], shape[0])),
                  origin,
-                 apix[0],
+                 apix0,
                  'mapname',)
     mapobj.fullMap = data_array.copy()
     mapobj.update_header()
     mapobj.write_to_MRC_file(fname)
 
-def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
+def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix0,
                       fft_obj, ifft_obj, cyc, verbose=0):
     """
     Returns 3 map instances for shifts in x,y,z directions
@@ -394,9 +394,9 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     ydata_r = ifft_obj(ydata_c, ydata_r)
     xdata_r = ifft_obj(xdata_c, xdata_r)
     if verbose >= 6:
-        writeMap(xdata_r, origin, apix, cmap.shape, f'gradx1map_{cyc}.map')    
-        writeMap(ydata_r, origin, apix, cmap.shape, f'gradx2map_{cyc}.map')    
-        writeMap(zdata_r, origin, apix, cmap.shape, f'gradx3map_{cyc}.map')
+        writeMap(xdata_r, origin, apix0, cmap.shape, f'gradx1map_{cyc}.map')    
+        writeMap(ydata_r, origin, apix0, cmap.shape, f'gradx2map_{cyc}.map')    
+        writeMap(zdata_r, origin, apix0, cmap.shape, f'gradx3map_{cyc}.map')
 
     #print(x1map.apix, x2map.apix, x3map.apix)
     #print(x1map.origin, x2map.origin, x3map.origin)
@@ -405,11 +405,14 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     x2map_r = ydata_r.copy()
     x3map_r = zdata_r.copy()
     # end map preparation
-    
+    dmap = dmap.astype('float64')
     # calculate XTY and apply mask
     # ymap=diffmap , mmap = mask
     #ymap = np.zeros(dmap.shape)
     #mmap = np.zeros(mask.shape)
+    if verbose >=3:
+        writeMap(dmap, origin, apix0, cmap.shape, f'ymap_{cyc}.map')
+
     ymap = dmap.copy()
     #mmap = mask.copy()
     ymap_m = ma.masked_array(ymap, mask=mmap).data
@@ -436,15 +439,15 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     x23map = x2map_r*x3map_r
     x33map = x3map_r*x3map_r
     if verbose >= 6:
-        writeMap(x11map, origin, apix, cmap.shape, f'x11map_{cyc}.map')
-        writeMap(x12map, origin, apix, cmap.shape, f'x12map_{cyc}.map')
-        writeMap(x13map, origin, apix, cmap.shape, f'x13map_{cyc}.map')
-        writeMap(x22map, origin, apix, cmap.shape, f'x22map_{cyc}.map')
-        writeMap(x23map, origin, apix, cmap.shape, f'x23map_{cyc}.map')
-        writeMap(x33map, origin, apix, cmap.shape, f'x33map_{cyc}.map')
-        writeMap(y1map, origin, apix, cmap.shape, f'y1map_{cyc}.map')
-        writeMap(y2map, origin, apix, cmap.shape, f'y2map_{cyc}.map')
-        writeMap(y3map, origin, apix, cmap.shape, f'y3map_{cyc}.map')
+        writeMap(x11map, origin, apix0, cmap.shape, f'x11map_{cyc}.map')
+        writeMap(x12map, origin, apix0, cmap.shape, f'x12map_{cyc}.map')
+        writeMap(x13map, origin, apix0, cmap.shape, f'x13map_{cyc}.map')
+        writeMap(x22map, origin, apix0, cmap.shape, f'x22map_{cyc}.map')
+        writeMap(x23map, origin, apix0, cmap.shape, f'x23map_{cyc}.map')
+        writeMap(x33map, origin, apix0, cmap.shape, f'x33map_{cyc}.map')
+        writeMap(y1map, origin, apix0, cmap.shape, f'y1map_{cyc}.map')
+        writeMap(y2map, origin, apix0, cmap.shape, f'y2map_{cyc}.map')
+        writeMap(y3map, origin, apix0, cmap.shape, f'y3map_{cyc}.map')
     #y1map = y1map.astype('float32')
     #y2map = y2map.astype('float32')
     #y3map = y3map.astype('float32')
@@ -461,7 +464,11 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     #dmap.set_apix_tempy()
     start = timer()
     fltr_data_r, scale = prepare_filter(rad, fltr, g_reci, g_real, ch,
-                                        origin, apix, dmap.shape)
+                                        origin, apix0, dmap.shape)
+    if verbose >= 3:
+        filt_ymap = mapfilter(ymap, fltr_data_r, scale, fft_obj, ifft_obj,
+                              g_real, g_reci)
+        writeMap(filt_ymap, origin, apix0, cmap.shape, f'filt_ymap{cyc}.map')
     # dmap_gt = SB.maptree(dmap)
     y1map = mapfilter(y1map, fltr_data_r, scale, fft_obj, ifft_obj, g_real,
                       g_reci)
@@ -483,15 +490,15 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
                        g_reci)
     end = timer()
     if verbose >= 6:
-        writeMap(x11map, origin, apix, cmap.shape, f'filt_x11map_{cyc}.map')
-        writeMap(x12map, origin, apix, cmap.shape, f'filt_x12map_{cyc}.map')
-        writeMap(x13map, origin, apix, cmap.shape, f'filt_x13map_{cyc}.map')
-        writeMap(x22map, origin, apix, cmap.shape, f'filt_x22map_{cyc}.map')
-        writeMap(x23map, origin, apix, cmap.shape, f'filt_x23map_{cyc}.map')
-        writeMap(x33map, origin, apix, cmap.shape, f'filt_x33map_{cyc}.map')
-        writeMap(y1map, origin, apix, cmap.shape, f'filt_y1map_{cyc}.map')
-        writeMap(y2map, origin, apix, cmap.shape, f'filt_y2map_{cyc}.map')
-        writeMap(y3map, origin, apix, cmap.shape, f'filt_y3map_{cyc}.map')
+        writeMap(x11map, origin, apix0, cmap.shape, f'filt_x11map_{cyc}.map')
+        writeMap(x12map, origin, apix0, cmap.shape, f'filt_x12map_{cyc}.map')
+        writeMap(x13map, origin, apix0, cmap.shape, f'filt_x13map_{cyc}.map')
+        writeMap(x22map, origin, apix0, cmap.shape, f'filt_x22map_{cyc}.map')
+        writeMap(x23map, origin, apix0, cmap.shape, f'filt_x23map_{cyc}.map')
+        writeMap(x33map, origin, apix0, cmap.shape, f'filt_x33map_{cyc}.map')
+        writeMap(y1map, origin, apix0, cmap.shape, f'filt_y1map_{cyc}.map')
+        writeMap(y2map, origin, apix0, cmap.shape, f'filt_y2map_{cyc}.map')
+        writeMap(y3map, origin, apix0, cmap.shape, f'filt_y3map_{cyc}.map')
     print('Filter maps : {0} s'.format(end-start))
     
     #x33map1.fullMap = x33map
@@ -525,12 +532,12 @@ def shift_field_coord(cmap, dmap, mmap, rad, fltr, origin, apix,
     m[:, 2, 1] = x23_f
     m[:, 2, 2] = x33_f
     print('check determinant')
-    det_m = np.linalg.det(m)
-    count_m0 = 0
-    for im in det_m:
-      if im == 0:
-        count_m0 += 1
-    print(count_m0)
+    #det_m = np.linalg.det(m)
+    #count_m0 = 0
+    #for im in det_m:
+    #  if im == 0:
+    #    count_m0 += 1
+    #print(count_m0)
     end = timer()
     print('Set matrix : {0} s'.format(end-start))
     start = timer()
