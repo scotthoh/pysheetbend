@@ -47,7 +47,7 @@ import os
 import map_scaling as DFM
 from sheetbend_cmdln_parser import sheetbendParser
 import datetime
-import tracemalloc
+# tracemalloc
 
 def has_converged(model0, model1, coor_tol, bfac_tol):
     coor_sum_sq = 0
@@ -66,7 +66,7 @@ def has_converged(model0, model1, coor_tol, bfac_tol):
     print(f"B-factor RMSD : {bfac_rmsd}")
     return (coor_rmsd < coor_tol and bfac_rmsd < bfac_tol)
 
-tracemalloc.start()
+#tracemalloc.start()
 # Parse command line input
 print(f'Started at {datetime.datetime.now()}')
 SP = sheetbendParser()
@@ -729,11 +729,11 @@ if ippdb is not None:
                     fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
                 fopen.close()
             sys.stdout.flush()
-            snapshot = tracemalloc.take_snapshot()
-            top_stats = snapshot.statistics('lineno')
-            print("[ Top 10 ]")
-            for stat in top_stats[:10]:
-                print(stat)
+            #snapshot = tracemalloc.take_snapshot()
+            #top_stats = snapshot.statistics('lineno')
+            #print("[ Top 10 ]")
+            #for stat in top_stats[:10]:
+            #    print(stat)
 
             #if len(shift_U) != 0:
             #    outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
