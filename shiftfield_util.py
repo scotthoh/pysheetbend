@@ -102,6 +102,50 @@ class GridDimension:
                        densMap.x_size()//2)
 
 
+def largest_prime_factor(n):
+    i = 2
+    while i * i <= n:
+        if n % i:
+            i += 1
+        else:
+            n //= i
+    return n
+
+
+def calc_best_grid_apix(spacing, cellsize):
+    out_grid = []
+    grid_shape = (int(round(cellsize[2]/spacing)),  # z
+                  int(round(cellsize[1]/spacing)),  # y
+                  int(round(cellsize[0]/spacing)))  # x
+    grid_same = True
+    for dim in grid_shape:
+        new_dim = dim
+        if new_dim % 2:
+            new_dim -= 1
+        largest_prime = largest_prime_factor(new_dim)
+        while largest_prime > 19:
+            new_dim -= 2
+            largest_prime = largest_prime_factor(new_dim)
+        out_grid.append(new_dim)
+        if new_dim != dim:
+            grid_same = False
+    
+    if not grid_same:
+        newapix = []
+        for i in range(0, 3):
+            newapix.append(float(cellsize[i])/float(out_grid[i]))
+        if newapix[0] == newapix[1] == newapix[2]:
+            newapix = newapix[0]
+    else:
+        newapix = spacing
+    # check if newapix is larger than apix
+    #for i in range(0, 3):
+    #    if newapix[i] < apix[i]:
+    print(f'new apix, grid : {newapix}, {out_grid}')
+    return out_grid, newapix
+
+
+
 def plan_fft(grid_dim):
     """
     Returns fft object. Plan fft

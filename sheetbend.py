@@ -47,6 +47,8 @@ import os
 import map_scaling as DFM
 from sheetbend_cmdln_parser import sheetbendParser
 import datetime
+import tracemalloc
+
 def has_converged(model0, model1, coor_tol, bfac_tol):
     coor_sum_sq = 0
     bfac_sum_sq = 0
@@ -64,7 +66,7 @@ def has_converged(model0, model1, coor_tol, bfac_tol):
     print(f"B-factor RMSD : {bfac_rmsd}")
     return (coor_rmsd < coor_tol and bfac_rmsd < bfac_tol)
 
-
+tracemalloc.start()
 # Parse command line input
 print(f'Started at {datetime.datetime.now()}')
 SP = sheetbendParser()
@@ -122,6 +124,10 @@ if resbycyc is None:
         print('Please specify the resolution of the map or')
         print('resolution by cycle.')
         exit('Program terminated ...')
+elif res > 0.0:
+    if res > resbycyc[-1]:
+        resbycyc0 = resbycyc
+        resbycyc = [resbycyc0[0], res]
 
 if refuiso or postrefuiso:
     print('B-factor bounds : {0} < B < {1}'.format(biso_range[0],
@@ -306,8 +312,13 @@ if ippdb is not None:
             # better gridshapes.
             # don't have to use lowpass as it doesn't affect results much
             spacing = rcyc/(2*samp_rate)
+            print(f'calculated spacing : {spacing}')
+            downsamp_shape, spacing = sf_util.calc_best_grid_apix(spacing,
+                                                                  (cell.a,
+                                                                   cell.b,
+                                                                   cell.c))
 
-            downsamp_map = mapin.downsample_map(spacing)
+            downsamp_map = mapin.downsample_map(spacing, downsamp_shape)
             downsamp_map.update_header()
             downsamp_shape = downsamp_map.fullMap.shape
             downsamp_apix = downsamp_map.apix
@@ -348,9 +359,9 @@ if ippdb is not None:
             # calculate difference map
             # truncate resolution - low pass filter; lpfiltb = True
             # spherical tophat function fall=0.01 tophat
-            #if verbose >= 1:
-            #    start = timer()
-            #timelog.start('DiffMap')
+            if verbose >= 1:
+                start = timer()
+            timelog.start('DiffMap')
             
             scl_map, scl_cmap, dmap = DFM.get_diffmap12(downsamp_map, cmap,
                                                         rcyc, rcyc,
@@ -378,7 +389,7 @@ if ippdb is not None:
             #lp_map.apix = apix0
             #map_curreso = Map(downsamp_map.fullMap, ori0,
             #                  downsamp_apix, mapin.filename)
-            if verbose >= 5:
+            if verbose >= 0:
                 print('check apix')
                 print(mapin.__class__.__name__)
                 print(mapin.apix)
@@ -411,8 +422,8 @@ if ippdb is not None:
             #    end = timer()
             #    print('density calc ', end-start)
             #if verbose > 5 and cyc == 0:
-            DFM.write_mapfile(scl_cmap, f'cmap_cyc{cyc+1}.map')
-            DFM.write_mapfile(scl_map, f'mapcurreso_cyc{cyc+1}.map')
+            #DFM.write_mapfile(scl_cmap, f'cmap_cyc{cyc+1}.map')
+            #DFM.write_mapfile(scl_map, f'mapcurreso_cyc{cyc+1}.map')
             #mapin.write_to_MRC_file('mapin.map')
             # try servalcat fofc calc
             #structure.write_to_PDB('temp_structfile.pdb', hetatom=False)
@@ -718,6 +729,12 @@ if ippdb is not None:
                     fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
                 fopen.close()
             sys.stdout.flush()
+            snapshot = tracemalloc.take_snapshot()
+            top_stats = snapshot.statistics('lineno')
+            print("[ Top 10 ]")
+            for stat in top_stats[:10]:
+                print(stat)
+
             #if len(shift_U) != 0:
             #    outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
             #    fuiso = open(outusiocsv, 'w')
@@ -775,7 +792,7 @@ if ippdb is None:
     for cycrr in range(0, ncycrr):
 '''
 
-
+    
 # write final pdb
 if oppdb is not None:
     outfname = '{0}_sheetbendfinal.pdb'.format(oppdb.strip('.pdb'))
@@ -797,5 +814,7 @@ if xmlout is not None:
 
 print(f'Ended at {datetime.datetime.now()}')
 timelog.profile_log()
+
+
 
 # need to use ccpem python tempy for the diff map
