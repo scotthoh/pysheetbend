@@ -207,18 +207,14 @@ if ipmap is not None:
     timelog.end('ifftplan')
     if isinstance(apix0, tuple):
         nyquist_res = maximum([2.0*apix0[i] for i in (0, 1, 2)])
-        max_apix = maximum(apix0)
-        if res > 0.0 and res > nyquist_res:
-            samp_rate = res/(2*max_apix)
-        else:
-            samp_rate = 1.5  # using res = nyquist_res
+        min_d = maximum(apix0)
     else:
-        nyquist_res = 2*apix0
-        if res > 0.0 and res > nyquist_res:
-            samp_rate = res/(2*apix0)
-        else:
-            samp_rate = 1.5
-        
+        min_d = apix0
+    
+    if res > 0.0 and res > nyquist_res:
+        samp_rate = res/(2*min_d)
+    else:
+        samp_rate = 1.5  # default same value from CLIPPER        
 
 if pseudoreg or mid_pseudoreg:
     print('PSEUDOREGULARIZE')
