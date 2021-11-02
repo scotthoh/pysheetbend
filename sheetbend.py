@@ -265,8 +265,8 @@ elif not nomask:
 if ippdb is not None:
     print('Refine Model against EM data')
     # calculate input map threshold/contour
-    '''mapin_t = scorer.calculate_map_threshold(mapin)
-    zg = np.linspace(0, mapin.z_size(), num=mapin.z_size(),
+    mapin_t = scorer.calculate_map_threshold(mapin)
+    '''zg = np.linspace(0, mapin.z_size(), num=mapin.z_size(),
                      endpoint=False)
     yg = np.linspace(0, mapin.y_size(), num=mapin.y_size(),
                      endpoint=False)
@@ -358,15 +358,21 @@ if ippdb is not None:
             
             # calculate difference map
             # truncate resolution - low pass filter; lpfiltb = True
+            # lowpass filtering map doesn't result in much difference
             # spherical tophat function fall=0.01 tophat
+            # in terms of b-factor shifts
+            # refsc > dust,refsc=False > refsc, dust > dust
+            # in terms of model better to worst
+            # dust,refsc=False > refsc > dust > refsc, dust
             if verbose >= 1:
                 start = timer()
-            timelog.start('DiffMap')
-            
+            timelog.start('DiffMap')            
             scl_map, scl_cmap, dmap = DFM.get_diffmap12(downsamp_map, cmap,
                                                         rcyc, rcyc,
                                                         cyc=cyc+1,
                                                         lpfiltb=False,
+                                                        flag_dust=False,
+                                                        refsc=False,
                                                         verbose=verbose)
             timelog.end('DiffMap')
             if verbose >= 1:
@@ -544,7 +550,6 @@ if ippdb is not None:
             #    print('Diff map calc: {0} s '.format(end-start))
             # xyz shiftfield refine pass in cmap, dmap, mmap, x1map, x2map,
             # x3map, radcyc, fltr, fftobj, iffobj
-            print("REFINE XYZ")
             '''
             cmap.write_to_MRC_file('cmap.map')
             
@@ -558,22 +563,23 @@ if ippdb is not None:
             '''
             #mmap.write_to_MRC_file('mmap.map')
             
-            x1map = Map(np.zeros(scl_cmap.fullMap.shape),
-                        scl_cmap.origin,
-                        downsamp_apix,
-                        'mapname',)
-            x2map = Map(np.zeros(scl_cmap.fullMap.shape),
-                        scl_cmap.origin,
-                        downsamp_apix,
-                        'mapname',)
-            x3map = Map(np.zeros(scl_cmap.fullMap.shape),
-                        scl_cmap.origin,
-                        downsamp_apix,
-                        'mapname',)
+            #x1map = Map(np.zeros(scl_cmap.fullMap.shape),
+            #            scl_cmap.origin,
+            #            downsamp_apix,
+            #            'mapname',)
+            #x2map = Map(np.zeros(scl_cmap.fullMap.shape),
+            #            scl_cmap.origin,
+            #            downsamp_apix,
+            #            'mapname',)
+            #x3map = Map(np.zeros(scl_cmap.fullMap.shape),
+            #            scl_cmap.origin,
+            #            downsamp_apix,
+            #            'mapname',)
             
             if refxyz:
+                print("REFINE XYZ")
                 timelog.start('Shiftfield')
-                print(f'maps dtype, lpcmap : {scl_cmap.fullMap.dtype}')
+                #print(f'maps dtype, lpcmap : {scl_cmap.fullMap.dtype}')
                 #print(f'mmap dtype : {mmap.fullMap.dtype}')
                 print(f'dmap dtype : {dmap.fullMap.dtype}')
                 #lp_cmap.fullMap = lp_cmap.fullMap.astype('float64')
@@ -607,45 +613,42 @@ if ippdb is not None:
                                                                    fltr,
                                                                    fft_obj,
                                                                    ifft_obj)'''
-                x1map.fullMap = x1m.copy()
-                x2map.fullMap = x2m.copy()
-                x3map.fullMap = x3m.copy()
+                #x1map.fullMap = x1m.copy()
+                #x2map.fullMap = x2m.copy()
+                #x3map.fullMap = x3m.copy()
                 timelog.end('Shiftfield')
                 # Read pdb and update
-                # need to use fractional coordinates for updating
-                # the derivatives.
                 # use linear interpolation instead of cubic
                 # size of x,y,z for x1map=x2map=x3map
                 #print(x1map.fullMap.box_size())
                 timelog.start('Interpolate')
                 interp_x1 = RegularGridInterpolator((zg, yg, xg),
-                                                    x1map.fullMap)
+                                                    x1m)
                 interp_x2 = RegularGridInterpolator((zg, yg, xg),
-                                                    x2map.fullMap)
+                                                    x2m)
                 interp_x3 = RegularGridInterpolator((zg, yg, xg),
-                                                    x3map.fullMap)
+                                                    x3m)
 
                 count = 0
                 v = structure.map_grid_position_array(scl_map, False)
                 v = np.flip(v, 1)
-                du = 2.0*interp_x1(v)
-                dv = 2.0*interp_x2(v)
-                dw = 2.0*interp_x3(v)
+                dx = (2.0*interp_x1(v))*cell.a
+                dy = (2.0*interp_x2(v))*cell.b
+                dz = (2.0*interp_x3(v))*cell.c
                 timelog.end('Interpolate')
                 timelog.start('UpdateModel')
                 for i in range(len(structure)):
-                    dx, dy, dz = np.matmul(np.array([du[i], dv[i], dw[i]]),
-                                           cell.orthmat)
+                    #dx, dy, dz = np.matmul(np.array([du[i], dv[i], dw[i]]),
+                    #                       cell.orthmat)
                     if verbose >= 1:
                         shift_vars.append([structure.atomList[i].get_name(),
                                           structure.atomList[i].get_x(),
                                           structure.atomList[i].get_y(),
                                           structure.atomList[i].get_z(),
-                                          du[i], dv[i], dw[i],
-                                          dx, dy, dz])
-                    structure.atomList[i].translate(dx, dy, dz)
+                                          dx[i], dy[i], dz[i]]) #du[i], dv[i], dw[i],
+                    structure.atomList[i].translate(dx[i], dy[i], dz[i])
                 timelog.end('UpdateModel')
-            
+                
             if mid_pseudoreg:
                 print('PSEUDOREGULARIZE')
                 timelog.start('MIDPSEUDOREG')
@@ -672,7 +675,7 @@ if ippdb is not None:
 
             # U-isotropic refinement
             
-            if refuiso and lastcyc:
+            if refuiso or (postrefuiso and lastcyc):
                 print('REFINE U ISO')
                 timelog.start('UISO')
                 x1m = shiftfield.shift_field_uiso(scl_cmap.fullMap,
@@ -683,11 +686,11 @@ if ippdb is not None:
                                                   ifft_obj,
                                                   (cell.a,
                                                    cell.b, cell.c))
-                x1map.fullMap = x1m.copy()
+                #x1map.fullMap = x1m.copy()
                 timelog.end('UISO')
                 timelog.start('Interpolate')
                 interp_x1 = RegularGridInterpolator((zg, yg, xg),
-                                                    x1map.fullMap)
+                                                    x1m)
                 v = structure.map_grid_position_array(scl_map, False)
                 v = np.flip(v, 1)
                 du = 1.0*interp_x1(v)
@@ -703,7 +706,6 @@ if ippdb is not None:
                         shift_U.append([structure.atomList[i].temp_fac,
                                         du[i], db[i]])
                 timelog.end('UpdateModel')
-            
             temp_result = sf_util.ResultsByCycle(cycrr, cyc, rcyc, radcyc,
                                                  ovl_map1, ovl_map2,
                                                  ovl_mdl1, ovl_mdl2, 0.0)
@@ -722,27 +724,28 @@ if ippdb is not None:
             if output_intermediate:
                 outname = '{0}_{1}.pdb'.format(oppdb.strip('.pdb'), cyc+1)
                 structure.write_to_PDB(outname, hetatom=hetatm_present)
-            if len(shift_vars) != 0:
+            if len(shift_vars) != 0 and verbose >= 2:
                 outcsv = 'shiftvars1_linalg_{0}.csv'.format(cyc+1)
                 fopen = open(outcsv, 'w')
                 for j in range(0, len(shift_vars)):
                     fopen.write('{0}, {1}\n'.format(j, shift_vars[j]))
                 fopen.close()
             sys.stdout.flush()
+
             #snapshot = tracemalloc.take_snapshot()
             #top_stats = snapshot.statistics('lineno')
             #print("[ Top 10 ]")
             #for stat in top_stats[:10]:
             #    print(stat)
 
-            #if len(shift_U) != 0:
-            #    outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
-            #    fuiso = open(outusiocsv, 'w')
-            #    for j in range(0, len(shift_U)):
-            #        fuiso.write('{0}, {1}\n'.format(j, shift_U[j]))
-            #    fuiso.close()
+            if len(shift_U) != 0 and verbose >= 2:
+                outusiocsv = 'shiftuiso_u2b_{0}.csv'.format(cyc+1)
+                fuiso = open(outusiocsv, 'w')
+                for j in range(0, len(shift_U)):
+                    fuiso.write('{0}, {1}\n'.format(j, shift_U[j]))
+                fuiso.close()
             # end of cycle loop
-        '''if pseudoreg:
+        if pseudoreg:
             print('PSEUDOREGULARIZE')
             timelog.start('PSEUDOREG')
             structure = preg.regularize_frag(structure)
@@ -759,12 +762,12 @@ if ippdb is not None:
                                                                  mapin_t,
                                                                  cmap_t)
             timelog.end('Scoring')
+            print(f'End of refine-regularise cycle {cycrr+1}')
             print('TEMPys scores :')
             print('Fraction of map overlapping with model: {0:.3f}'
                   .format(ovl_mapf))
             print('Fraction of model overlapping with map: {0:.3f}'
                   .format(ovl_mdlf))
-        '''    
         # end of psedo reg loop
 
 # CASE 2: refine against observations
