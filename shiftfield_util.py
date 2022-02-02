@@ -1,31 +1,96 @@
 # Utily functions for shiftfield code
 # S.W.Hoh, University of York, 2020
 
+import os
 import math
-import numpy as np
 from timeit import default_timer as timer
 from collections import OrderedDict
-import os
-#from time import perf_counter
-'''
-from TEMPy.math.vector import Vector
-from TEMPy.maps.em_map import Map
-#from TEMPy.maps.map_parser import MapParser as mp
-#from TEMPy.protein.structure_blurrer import StructureBlurrer
-'''
+import numpy as np
+
 
 from TEMPy.Vector import Vector as Vector
 from TEMPy.EMMap import Map
+from TEMPy.StructureParser import mmCIFParser as cifp
+from TEMPy.StructureParser import PDBParser as pdbp
+from TEMPy.ProtRep_Biopy import BioPy_Structure as BPS
+from TEMPy.MapParser import MapParser as mp
+
+"""
+# from time import perf_counter
+from TEMPy.math.vector import Vector
+from TEMPy.maps.em_map import Map
+from TEMPy.maps.map_parser import MapParser as mp
+from TEMPy.protein.structure_parser import mmCIFParser as cifp
+from TEMPy.protein.structure_parser import PDBParser as pdbp
+from TEMPy.protein.prot_rep_biopy import BioPy_Structure as BPS
+
+
+#from TEMPy.protein.structure_blurrer import StructureBlurrer
+"""
 #'''
 try:
     import pyfftw
+
     pyfftw_flag = True
 except ImportError:
     pyfftw_flag = False
 
 import sys
+
 if sys.version_info[0] > 2:
     from builtins import isinstance
+
+
+def get_structure(ippdb, hetatom=False, verbose=0):
+    """
+    Read structure from file and return BioPy_Structure object
+    Arguments:
+        ippdb: coordinates file path (pdb/mmcif)
+        hetatom: boolean to include hetatoms or not
+        verbose: verbosity
+    """
+    if ippdb is None:
+        print("Please specify path/file for input coordinates.\n")
+        print("Exiting...\n")
+        sys.exit()
+
+    struc_id, file_ext = os.path.basename(ippdb).split(".")
+    if file_ext == "pdb" or file_ext == "ent":
+        structure = pdbp.read_PDB_file(struc_id, ippdb, hetatm=hetatom, water=False)
+    else:
+        structure = cifp.read_mmCIF_file(struc_id, ippdb, hetatm=hetatom, water=False)
+    # reordering residues to make sure residues from same chain are grouped together
+    new_reordered_struct = []
+    chainlist = structure.split_into_chains()
+    for c in chainlist:
+        c.reorder_residues()
+        new_reordered_struct = np.append(new_reordered_struct, c)
+    struc = BPS(new_reordered_struct)
+    hetatm_present = False
+    for atm in struc.atomList:
+        if atm.record_name == "HETATM":
+            hetatm_present = True
+            break
+
+    return struc, hetatm_present
+
+
+def has_converged(model0, model1, coor_tol, bfac_tol):
+    coor_sum_sq = 0
+    bfac_sum_sq = 0
+    num_atms = len(model0)
+    for n in range(0, num_atms):
+        d = model0.atomList[n].distance_from_atom(model1.atomList[n])
+        coor_sum_sq += np.square(d)
+        d_bfac = model0.atomList[n].temp_fac - model1.atomList[n].temp_fac
+        bfac_sum_sq += np.square(d_bfac)
+
+    coor_rmsd = np.sqrt(coor_sum_sq / num_atms)
+    bfac_rmsd = np.sqrt(bfac_sum_sq / num_atms)
+    print("Testing for convergence")
+    print(f"Coordinate RMSD : {coor_rmsd}")
+    print(f"B-factor RMSD : {bfac_rmsd}")
+    return coor_rmsd < coor_tol and bfac_rmsd < bfac_tol
 
 
 def mapGridPositions_radius(densMap, atom, gridtree, radius):
@@ -48,16 +113,16 @@ def mapGridPositions_radius(densMap, atom, gridtree, radius):
     x_pos = int(round((atom.x - origin[0]) / apix, 0))
     y_pos = int(round((atom.y - origin[1]) / apix, 0))
     z_pos = int(round((atom.z - origin[2]) / apix, 0))
-    if((densMap.x_size() >= x_pos >= 0) and (densMap.y_size() >= y_pos >= 0)
-       and (densMap.z_size() >= z_pos >= 0)):
+    if (
+        (densMap.x_size() >= x_pos >= 0)
+        and (densMap.y_size() >= y_pos >= 0)
+        and (densMap.z_size() >= z_pos >= 0)
+    ):
         # search all points within radius of atom
-        list_points = gridtree.query_ball_point([atom.x,
-                                                 atom.y,
-                                                 atom.z],
-                                                radius)
+        list_points = gridtree.query_ball_point([atom.x, atom.y, atom.z], radius)
         return list_points  # ,(x_pos, y_pos, z_pos)
     else:
-        print('Warning, atom out of map box')
+        print("Warning, atom out of map box")
         return []
 
 
@@ -75,9 +140,9 @@ def make_atom_overlay_map1_rad(mapin, prot, gridtree, rad):
         points = mapGridPositions_radius(densMap, atm, gridtree[0], rad)
         for ind in points:
             pos = gridtree[1][ind]
-            p_z = int(pos[2] - densMap.apix/2.0)
-            p_y = int(pos[1] - densMap.apix/2.0)
-            p_x = int(pos[0] - densMap.apix/2.0)
+            p_z = int(pos[2] - densMap.apix / 2.0)
+            p_y = int(pos[1] - densMap.apix / 2.0)
+            p_x = int(pos[0] - densMap.apix / 2.0)
             densMap.fullMap[p_z, p_y, p_x] = 1.0
     return densMap
 
@@ -86,20 +151,22 @@ class GridDimension:
     """
     Grid dimensions object
     """
-    def __init__(self, densMap):
+
+    def __init__(self, grid_shape):
         """
         Sets up grid size in real, reciprocal and half space
         Arguments
-        *densMap*
-          Input map
+        *grid_shape*
+          grid_shape
         """
-        self.grid_sam = densMap.fullMap.shape
-        self.g_reci = (densMap.z_size(), densMap.y_size(),
-                       densMap.x_size()//2+1)
-        self.g_real = (densMap.z_size(), densMap.y_size(),
-                       densMap.x_size())
-        self.g_half = (densMap.z_size()//2, densMap.y_size()//2,
-                       densMap.x_size()//2)
+        self.grid_sam = grid_shape
+        self.g_reci = (self.grid_sam[0], self.grid_sam[1], self.grid_sam[2] // 2 + 1)
+        self.g_real = (self.grid_sam[0], self.grid_sam[1], self.grid_sam[2])
+        self.g_half = (
+            self.grid_sam[0] // 2,
+            self.grid_sam[1] // 2,
+            self.grid_sam[2] // 2,
+        )
 
 
 def largest_prime_factor(n):
@@ -114,9 +181,11 @@ def largest_prime_factor(n):
 
 def calc_best_grid_apix(spacing, cellsize):
     out_grid = []
-    grid_shape = (int(round(cellsize[2]/spacing)),  # z
-                  int(round(cellsize[1]/spacing)),  # y
-                  int(round(cellsize[0]/spacing)))  # x
+    grid_shape = (
+        int(round(cellsize[2] / spacing)),  # z
+        int(round(cellsize[1] / spacing)),  # y
+        int(round(cellsize[0] / spacing)),  # x
+    )
     grid_same = True
     for dim in grid_shape:
         new_dim = dim
@@ -129,21 +198,20 @@ def calc_best_grid_apix(spacing, cellsize):
         out_grid.append(new_dim)
         if new_dim != dim:
             grid_same = False
-    
+
     if not grid_same:
         newapix = []
         for i in range(0, 3):
-            newapix.append(float(cellsize[i])/float(out_grid[i]))
+            newapix.append(float(cellsize[i]) / float(out_grid[i]))
         if newapix[0] == newapix[1] == newapix[2]:
             newapix = newapix[0]
     else:
         newapix = spacing
     # check if newapix is larger than apix
-    #for i in range(0, 3):
+    # for i in range(0, 3):
     #    if newapix[i] < apix[i]:
-    print(f'new apix, grid : {newapix}, {out_grid}')
+    print(f"new apix, grid : {newapix}, {out_grid}")
     return out_grid, newapix
-
 
 
 def plan_fft(grid_dim):
@@ -159,17 +227,28 @@ def plan_fft(grid_dim):
         if not pyfftw_flag:
             raise ImportError
 
-        input_arr = pyfftw.empty_aligned(grid_dim.grid_sam,
-                                         #dtype='float32', n=16)
-                                         dtype='float64', n=16)
-        output_arr = pyfftw.empty_aligned(output_shape,
-                                          #dtype='complex64', n=16)
-                                          dtype='complex128', n=16)
+        input_arr = pyfftw.empty_aligned(
+            grid_dim.g_real,
+            # dtype='float32', n=16)
+            dtype="float64",
+            n=16,
+        )
+        output_arr = pyfftw.empty_aligned(
+            output_shape,
+            # dtype='complex64', n=16)
+            dtype="complex128",
+            n=16,
+        )
         # fft planning
-        fft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_FORWARD',
-                          axes=(0, 1, 2), flags=['FFTW_ESTIMATE'])
+        fft = pyfftw.FFTW(
+            input_arr,
+            output_arr,
+            direction="FFTW_FORWARD",
+            axes=(0, 1, 2),
+            flags=["FFTW_ESTIMATE"],
+        )
     except ImportError:
-        print('Not running')
+        print("Not running")
 
     return fft
 
@@ -186,16 +265,24 @@ def plan_ifft(grid_dim):
     try:
         if not pyfftw_flag:
             raise ImportError
-        input_arr = pyfftw.empty_aligned(grid_dim.g_reci,
-                                         dtype='complex128', n=16)
-                                         #dtype='complex64', n=16)
-        output_arr = pyfftw.empty_aligned(output_shape,
-                                          #dtype='float32', n=16)
-                                          dtype='float64', n=16)
+        input_arr = pyfftw.empty_aligned(grid_dim.g_reci, dtype="complex128", n=16)
+        # dtype='complex64', n=16)
+        output_arr = pyfftw.empty_aligned(
+            output_shape,
+            # dtype='float32', n=16)
+            dtype="float64",
+            n=16,
+        )
         # ifft planning,
-        ifft = pyfftw.FFTW(input_arr, output_arr, direction='FFTW_BACKWARD', axes=(0,1,2), flags=['FFTW_ESTIMATE'])
+        ifft = pyfftw.FFTW(
+            input_arr,
+            output_arr,
+            direction="FFTW_BACKWARD",
+            axes=(0, 1, 2),
+            flags=["FFTW_ESTIMATE"],
+        )
     except ImportError:
-        print('Not running')
+        print("Not running")
 
     return ifft
 
@@ -211,14 +298,14 @@ def cor_mod(a, b):
       Divisor
     """
     c = np.fmod(a, b)
-    if (c < 0):
+    if c < 0:
         c += b
     return int(c)
 
 
 def hkl_c(c, ch, g):
     """
-    Returns the index 
+    Returns the index
     Arguments
     *c*
       Index h,k,l
@@ -234,9 +321,7 @@ def hkl_c(c, ch, g):
     # cv = Vector(int(c[0]), int(c[1]), int(c[2]))
     # chv = Vector(int(ch[0]), int(ch[1]), int(ch[2]))
     v1 = cv + chv
-    m1 = Vector(cor_mod(v1.x, g[2]),
-                cor_mod(v1.y, g[1]),
-                cor_mod(v1.z, g[0]))
+    m1 = Vector(cor_mod(v1.x, g[2]), cor_mod(v1.y, g[1]), cor_mod(v1.z, g[0]))
 
     return m1 - chv
 
@@ -245,7 +330,7 @@ def eightpi2():
     """
     Returns 8*pi*pi
     """
-    return (8.0 * np.pi * np.pi)
+    return 8.0 * np.pi * np.pi
 
 
 def u2b(u_iso):
@@ -282,7 +367,7 @@ def limit_biso(b_iso, blo, bhi):
         upper limit of b isotropic value
     """
     return bhi if b_iso > bhi else blo if b_iso < blo else b_iso
-    
+
     return b_iso
 
 
@@ -290,6 +375,7 @@ class Cell:
     """
     Cell object
     """
+
     def __init__(self, a, b, c, alpha, beta, gamma):
         """
         Arguments:
@@ -303,9 +389,16 @@ class Cell:
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
+        if self.alpha > np.pi:
+            self.alpha = np.deg2rad(alpha)
+        if self.beta > np.pi:
+            self.beta = np.deg2rad(beta)
+        if self.gamma > np.pi:
+            self.gamma = np.deg2rad(gamma)
+        rad_90deg = np.deg2rad(90.0)
 
-        if alpha == 90.0 and gamma == 90.0 and beta == 90.0:
-            self.vol = a*b*c
+        if alpha == rad_90deg and gamma == rad_90deg and beta == rad_90deg:
+            self.vol = a * b * c
             # deal with null
             if self.vol <= 0.0:
                 raise ValueError
@@ -314,22 +407,16 @@ class Cell:
             self.orthmat[1, 1] = b
             self.orthmat[2, 2] = c
             self.fracmat = np.linalg.inv(self.orthmat)
-            self.realmetric = (a*a, b*b, c*c, 0.0, 0.0, 0.0)
-            self.recimetric = (1/(a*a), 1/(b*b), 1/(c*c), 0.0, 0.0, 0.0)
+            self.realmetric = (a * a, b * b, c * c, 0.0, 0.0, 0.0)
+            self.recimetric = (1 / (a * a), 1 / (b * b), 1 / (c * c), 0.0, 0.0, 0.0)
         else:
-            if self.alpha > np.pi:
-                self.alpha = np.deg2rad(alpha)
-                print('deg2rad')
-            if self.beta > np.pi:
-                self.beta = np.deg2rad(beta)
-            if self.gamma > np.pi:
-                self.gamma = np.deg2rad(gamma)
-
-            self.vol = a*b*c*np.sqrt(2.0*np.cos(self.alpha)*np.cos(self.beta)
-                                     * np.cos(self.gamma)-np.cos(self.alpha)
-                                     * np.cos(self.alpha)-np.cos(self.beta)
-                                     * np.cos(self.beta)-np.cos(self.gamma)
-                                     * np.cos(self.gamma)+1.0)
+            self.vol = (a * b * c) * np.sqrt(
+                2.0 * np.cos(self.alpha) * np.cos(self.beta) * np.cos(self.gamma)
+                - np.cos(self.alpha) * np.cos(self.alpha)
+                - np.cos(self.beta) * np.cos(self.beta)
+                - np.cos(self.gamma) * np.cos(self.gamma)
+                + 1.0
+            )
             # deal with null
             if self.vol <= 0.0:
                 raise ValueError
@@ -337,44 +424,52 @@ class Cell:
             # orthogonalisation + fractionisation matrices
             self.orthmat = np.identity(3)
             self.orthmat[0, 0] = a
-            self.orthmat[0, 1] = self.orthmat[1, 0] = b*np.cos(self.gamma)  # if 90deg = 0
-            self.orthmat[0, 2] = self.orthmat[2, 0] = c*np.cos(self.beta)  # if 90deg = 0
-            self.orthmat[1, 1] = b*np.sin(self.gamma)  # if 90deg = b
-            self.orthmat[1, 2] = -c*np.sin(self.beta)*np.cos(self.alpha_star())  # if 90deg, 0
+            self.orthmat[0, 1] = self.orthmat[1, 0] = b * np.cos(
+                self.gamma
+            )  # if 90deg = 0
+            self.orthmat[0, 2] = self.orthmat[2, 0] = c * np.cos(
+                self.beta
+            )  # if 90deg = 0
+            self.orthmat[1, 1] = b * np.sin(self.gamma)  # if 90deg = b
+            self.orthmat[1, 2] = (
+                -c * np.sin(self.beta) * np.cos(self.alpha_star())
+            )  # if 90deg, 0
             self.orthmat[2, 1] = self.orthmat[1, 2]
-            self.orthmat[2, 2] = c*np.sin(self.beta)*np.sin(self.alpha_star())  # if 90deg, c
+            self.orthmat[2, 2] = (
+                c * np.sin(self.beta) * np.sin(self.alpha_star())
+            )  # if 90deg, c
             self.fracmat = np.linalg.inv(self.orthmat)
 
             # calculate metric_tensor
-            self.realmetric = self.metric_tensor(self.a, self.b, self.c,
-                                                 self.alpha, self.beta,
-                                                 self.gamma)
-            self.recimetric = self.metric_tensor(self.a_star(), self.b_star(),
-                                                 self.c_star(),
-                                                 self.alpha_star(),
-                                                 self.beta_star(),
-                                                 self.gamma_star())
+            self.realmetric = self.real_metric_tensor()
+            self.recimetric = self.reci_metric_tensor()
 
     def alpha_star(self):
-        return np.arccos((np.cos(self.gamma)*np.cos(self.beta)-np.cos(self.alpha))
-                         / (np.sin(self.beta)*np.sin(self.gamma)))
+        return np.arccos(
+            (np.cos(self.gamma) * np.cos(self.beta) - np.cos(self.alpha))
+            / (np.sin(self.beta) * np.sin(self.gamma))
+        )
 
     def beta_star(self):
-        return np.arccos((np.cos(self.alpha)*np.cos(self.gamma)-np.cos(self.beta))
-                         / (np.sin(self.gamma)*np.sin(self.alpha)))
+        return np.arccos(
+            (np.cos(self.alpha) * np.cos(self.gamma) - np.cos(self.beta))
+            / (np.sin(self.gamma) * np.sin(self.alpha))
+        )
 
     def gamma_star(self):
-        return np.arccos((np.cos(self.beta)*np.cos(self.alpha)-np.cos(self.gamma))
-                         / (np.sin(self.alpha)*np.sin(self.beta)))
+        return np.arccos(
+            (np.cos(self.beta) * np.cos(self.alpha) - np.cos(self.gamma))
+            / (np.sin(self.alpha) * np.sin(self.beta))
+        )
 
     def a_star(self):
-        return self.b*self.c*np.sin(self.alpha)/self.vol
+        return self.b * self.c * np.sin(self.alpha) / self.vol
 
     def b_star(self):
-        return self.c*self.a*np.sin(self.beta)/self.vol
+        return self.c * self.a * np.sin(self.beta) / self.vol
 
     def c_star(self):
-        return self.a*self.b*np.sin(self.gamma)/self.vol
+        return self.a * self.b * np.sin(self.gamma) / self.vol
 
     def volume(self):
         return self.vol
@@ -397,20 +492,31 @@ class Cell:
     def getgamma(self):
         return self.gamma
 
-    def metric_tensor(self, a, b, c, alp, bet, gam):
-        m00 = a*a
-        m11 = b*b
-        m22 = c*c
-        m01 = 2.0*a*b*np.cos(gam)
-        m02 = 2.0*a*c*np.cos(bet)
-        m12 = 2.0*b*c*np.cos(alp)
+    def real_metric_tensor(self):
+        m00 = self.a * self.a
+        m11 = self.b * self.b
+        m22 = self.c * self.c
+        m01 = 2.0 * self.a * self.b * np.cos(self.gamma)
+        m02 = 2.0 * self.a * self.c * np.cos(self.beta)
+        m12 = 2.0 * self.b * self.c * np.cos(self.alpha)
         return (m00, m11, m22, m01, m02, m12)
 
-    def metric_reci_lengthsq(self, x, y, z):
-        return (x*(x*self.recimetric[0] + y*self.recimetric[3]
-                   + z*self.recimetric[4])
-                + y*(y*self.recimetric[1] + z*self.recimetric[5])
-                + z*(z*self.recimetric[2]))
+    def reci_metric_tensor(self):
+        m00 = self.a_star() * self.a_star()
+        m11 = self.b_star() * self.b_star()
+        m22 = self.c_star() * self.c_star()
+        m01 = 2.0 * self.a_star() * self.b_star() * np.cos(self.gamma_star())
+        m02 = 2.0 * self.a_star() * self.c_star() * np.cos(self.beta_star())
+        m12 = 2.0 * self.b_star() * self.c_star() * np.cos(self.alpha_star())
+        return (m00, m11, m22, m01, m02, m12)
+
+
+def metric_reci_lengthsq(x, y, z, metric_tensor):
+    return (
+        x * (x * metric_tensor[0] + y * metric_tensor[3] + z * metric_tensor[4])
+        + y * (y * metric_tensor[1] + z * metric_tensor[5])
+        + z * (z * metric_tensor[2])
+    )
 
 
 def crop_mapgrid_points(x0, y0, z0, densmap, k=4):
@@ -418,10 +524,12 @@ def crop_mapgrid_points(x0, y0, z0, densmap, k=4):
     Return cropped map containing density data
     of surrounding 64 map grid points of atom_point
     """
-    boxmap = Map(np.zeros((4, 4, 4)),
-                 [0, 0, 0],
-                 densmap.apix,
-                 'mapname',)
+    boxmap = Map(
+        np.zeros((4, 4, 4)),
+        [0, 0, 0],
+        densmap.apix,
+        "mapname",
+    )
 
     # problem: should the atom point be at the corner of the box or
     # the centre for interpolation
@@ -448,7 +556,7 @@ def get_lowerbound_posinnewbox(xg, yg, zg):
     *z*
       Index in z direction
     """
-    
+
     x0 = int(xg - 1)
     y0 = int(yg - 1)
     z0 = int(zg - 1)
@@ -479,10 +587,12 @@ def maptree_zyx(densmap):
 
     try:
         from scipy.spatial import cKDTree
+
         gridtree = cKDTree(indi)
     except ImportError:
         try:
             from scipy.spatial import KDTree
+
             gridtree = KDTree(indi)
         except ImportError:
             return
@@ -496,6 +606,7 @@ class RadialFilter:
     """
     Radial filter object
     """
+
     def __init__(self, radcyc, function, densmap):
         """
         Initialise filter object, sets the radius and function to use
@@ -510,52 +621,50 @@ class RadialFilter:
         self.verbose = 0
         self.radius = radcyc
         self.function = function
-        '''if function == 'step':
+        """if function == 'step':
             self.function = 0
         elif function == 'linear':
             self.function = 1
         elif function == 'quadratic':
             self.function = 2
-        '''
+        """
         # function = step, linear, quadratic
         # determine effective radius of radial function
         self.nrad = 1000
         self.drad = 0.25
-        self.sum_r = [0.0]*self.nrad
+        self.sum_r = [0.0] * self.nrad
         self.gridshape = GridDimension(densmap)
 
         for i in range(0, self.nrad):
             r = self.drad * (float(i) + 0.5)
-            self.sum_r[i] = r*r*math.fabs(self.fltr(r))
+            self.sum_r[i] = r * r * math.fabs(self.fltr(r))
 
         for i in range(1, self.nrad):
-            self.sum_r[i] += self.sum_r[i-1]
+            self.sum_r[i] += self.sum_r[i - 1]
         for i in range(0, self.nrad):
-            if self.sum_r[i] > 0.99*self.sum_r[self.nrad-1]:
+            if self.sum_r[i] > 0.99 * self.sum_r[self.nrad - 1]:
                 break
-        self.rad = self.drad*(float(i)+1.0)
-        self.fltr_data_r = np.zeros(self.gridshape.grid_sam, dtype='float64')
+        self.rad = self.drad * (float(i) + 1.0)
+        self.fltr_data_r = np.zeros(self.gridshape.grid_sam, dtype="float64")
         f000 = 0.0
         # z,y,x convention
-        origin = np.array([densmap.origin[2], densmap.origin[1],
-                          densmap.origin[0]])
+        origin = np.array([densmap.origin[2], densmap.origin[1], densmap.origin[0]])
         if isinstance(densmap.apix, tuple):
-            apix = np.array([densmap.apix[2], densmap.apix[1],
-                            densmap.apix[0]])
-        else:    
+            apix = np.array([densmap.apix[2], densmap.apix[1], densmap.apix[0]])
+        else:
             apix = np.array([densmap.apix, densmap.apix, densmap.apix])
 
-        #g_half = (g_real[0]//2, g_real[1]//2, g_real[0]//2+1)
-        #SB = StructureBlurrer()
-        #gt = SB.maptree(densmap)
+        # g_half = (g_real[0]//2, g_real[1]//2, g_real[0]//2+1)
+        # SB = StructureBlurrer()
+        # gt = SB.maptree(densmap)
         self.gt = maptree_zyx(densmap)
-        # filpping indices made things wrong because the 
+        # filpping indices made things wrong because the
         # the chronology of indices has changed.
         # is this true? pt1 = 001 and pt1 = 100 different
-        #start = timer() # flipping indices takes about 0.4 sec 
-        #indi = np.flip(gt[1], 1) # gt[1] indices is x,y,z , flip become z,y,x
-        #end = timer()
-        #print('flip indices ', end-start)
+        # start = timer() # flipping indices takes about 0.4 sec
+        # indi = np.flip(gt[1], 1) # gt[1] indices is x,y,z , flip become z,y,x
+        # end = timer()
+        # print('flip indices ', end-start)
 
         gh = np.array([self.gridshape.g_half])
         if self.verbose >= 1:
@@ -563,33 +672,33 @@ class RadialFilter:
         c = self.gt[1] + gh  # self.gridshape.g_half
         if self.verbose >= 1:
             end = timer()
-            print('indi + halfgrid ', end-start)
+            print("indi + halfgrid ", end - start)
 
         if self.verbose >= 1:
             start = timer()
         c1 = self.cor_mod1(c, self.gridshape.grid_sam) - gh
         if self.verbose >= 1:
             end = timer()
-            print('cor mod ', end-start)
+            print("cor mod ", end - start)
 
         if self.verbose >= 1:
             start = timer()
-        pos = c1[:]*apix+origin
+        pos = c1[:] * apix + origin
         r = np.sqrt(np.sum(np.square(pos), axis=1))
         if self.verbose >= 1:
             end = timer()
-            print('indices get r ', end-start)
-        #for i in range(len(r)):
+            print("indices get r ", end - start)
+        # for i in range(len(r)):
         #    print(pos[i], c1[i], gt[1][i], r[i])
         if self.verbose >= 1:
             start = timer()
-            print('self.rad ', self.rad)
+            print("self.rad ", self.rad)
         r_ind = np.nonzero(r < self.rad)
-        #r = np.where(r < self.rad, self.fltr(r), 0.0)
-        #r_ind = np.nonzero(r)
+        # r = np.where(r < self.rad, self.fltr(r), 0.0)
+        # r_ind = np.nonzero(r)
         if self.verbose >= 1:
             end = timer()
-            print('nonzero transpose ', end-start)
+            print("nonzero transpose ", end - start)
 
         if self.verbose >= 1:
             start = timer()
@@ -598,15 +707,17 @@ class RadialFilter:
         for i in r_ind[0]:
             rf = self.fltr(r[i])
             f000 += rf
-            #print(gt[1][i][0], gt[1][i][1], gt[1][i][2], rf)
+            # print(gt[1][i][0], gt[1][i][1], gt[1][i][2], rf)
             count += 1
-            self.fltr_data_r[self.gt[1][i][0], self.gt[1][i][1], self.gt[1][i][2]] = rf #[i]
-        
+            self.fltr_data_r[
+                self.gt[1][i][0], self.gt[1][i][1], self.gt[1][i][2]
+            ] = rf  # [i]
+
         if self.verbose >= 1:
             end = timer()
-            print('fill radial function map ', end-start)
-            print('count ', count)
-        '''
+            print("fill radial function map ", end - start)
+            print("count ", count)
+        """
         count = 0
         print('self.rad ', self.rad)
         for ind in range(0,len(gt[1])):
@@ -623,11 +734,11 @@ class RadialFilter:
                 #self.fltr_data_r[xyz[2], xyz[1], xyz[0]] = r
                 count+=1
         end=timer()
-        '''
+        """
         # calc scale factor
-        self.scale = 1.0/f000
+        self.scale = 1.0 / f000
         if self.verbose >= 1:
-            print('scale, ', self.scale, ' f000, ', f000)
+            print("scale, ", self.scale, " f000, ", f000)
 
     def cor_mod1(self, a, b):
         """
@@ -641,10 +752,10 @@ class RadialFilter:
         """
         c = np.fmod(a, b)
         d = np.transpose(np.nonzero(c < 0))
-        #d, e = np.nonzero(c<0)
-        for i in d:  #range(len(d)):
+        # d, e = np.nonzero(c<0)
+        for i in d:  # range(len(d)):
             c[i[0], i[1]] += b[i[1]]
-            #c[i, j] += b[i]
+            # c[i, j] += b[i]
         return c
 
     def fltr(self, r):
@@ -656,9 +767,9 @@ class RadialFilter:
         """
         if r < self.radius:
             if self.function == 2:
-                return pow((1.0-r)/self.radius, 2)
+                return pow((1.0 - r) / self.radius, 2)
             elif self.function == 1:
-                return (1.0-r)/self.radius
+                return (1.0 - r) / self.radius
             elif self.function == 0:
                 return 1.0
         else:
@@ -676,22 +787,22 @@ class RadialFilter:
           ifft object
         """
         # copy map data and filter data
-        data_r = np.zeros(self.gridshape.grid_sam, dtype='float64')
+        data_r = np.zeros(self.gridshape.grid_sam, dtype="float64")
         data_r = data_arr.copy()
-        fltr_input = np.zeros(self.gridshape.grid_sam, dtype='float64')
+        fltr_input = np.zeros(self.gridshape.grid_sam, dtype="float64")
         fltr_input = self.fltr_data_r.copy()
-        
+
         if self.verbose >= 1:
             start = timer()
         # create complex data array
-        fltr_data_c = np.zeros(self.gridshape.g_reci, dtype='complex128')
-        data_c = np.zeros(self.gridshape.g_reci, dtype='complex128')
+        fltr_data_c = np.zeros(self.gridshape.g_reci, dtype="complex128")
+        data_c = np.zeros(self.gridshape.g_reci, dtype="complex128")
         # fourier transform of filter data
         fltr_data_c = fft_obj(fltr_input, fltr_data_c)
         fltr_data_c = fltr_data_c.conjugate().copy()
         if self.verbose >= 1:
             end = timer()
-            print('fft fltr_data : {0}s'.format(end-start))
+            print("fft fltr_data : {0}s".format(end - start))
         if self.verbose >= 1:
             start = timer()
         # fourier transform of map data
@@ -699,14 +810,14 @@ class RadialFilter:
         data_c = data_c.conjugate().copy()
         if self.verbose >= 1:
             end = timer()
-            print('fft data : {0}s'.format(end-start))
+            print("fft data : {0}s".format(end - start))
         # apply filter
         if self.verbose >= 1:
             start = timer()
-        data_c[:, :, :] = self.scale*data_c[:, :, :]*fltr_data_c[:, :, :]
+        data_c[:, :, :] = self.scale * data_c[:, :, :] * fltr_data_c[:, :, :]
         if self.verbose >= 1:
             end = timer()
-            print('Convolution : {0}s'.format(end-start))
+            print("Convolution : {0}s".format(end - start))
 
         # inverse fft
         if self.verbose >= 1:
@@ -715,7 +826,7 @@ class RadialFilter:
         data_r = ifft_obj(data_c, data_r)
         if self.verbose >= 1:
             end = timer()
-            print('ifft : {0}s'.format(end-start))
+            print("ifft : {0}s".format(end - start))
 
         return data_r
 
@@ -725,9 +836,19 @@ class ResultsByCycle:
     """
     Dataclass to stor results for each cycle.
     """
-    def __init__(self, cyclerr, cycle, resolution, radius,
-                 mapmdlfrac, mapmdlfrac_reso,
-                 mdlmapfrac, mdlmapfrac_reso, fscavg):
+
+    def __init__(
+        self,
+        cyclerr,
+        cycle,
+        resolution,
+        radius,
+        mapmdlfrac,
+        mapmdlfrac_reso,
+        mdlmapfrac,
+        mdlmapfrac_reso,
+        fscavg,
+    ):
         """
         Initialise results for the cycle
         """
@@ -740,7 +861,8 @@ class ResultsByCycle:
         self.mdlmapfrac = mdlmapfrac
         self.mdlmapfrac_reso = mdlmapfrac_reso
         self.fscavg = fscavg
-    '''
+
+    """
     cyclerr: int
     cycle: int
     resolution: float
@@ -750,7 +872,8 @@ class ResultsByCycle:
     mdlmapfrac: float
     mdlmapfrac_reso: float
     fscavg: float
-    '''
+    """
+
     def write_xml_results_start(self, f, oppdb, ippdb):
         """
         Write the starting lines for XML output
@@ -758,11 +881,11 @@ class ResultsByCycle:
         *f*
             file object
         """
-        f.write('<SheetbendResult>\n')
-        f.write(' <Title>{0}</Title>\n'.format(os.path.basename(ippdb)))
-        f.write(' <RefinedPDB>{0}</RefinedPDB>\n'.format(oppdb))
-        f.write(' <Cycles>\n')
-        
+        f.write("<SheetbendResult>\n")
+        f.write(" <Title>{0}</Title>\n".format(os.path.basename(ippdb)))
+        f.write(" <RefinedPDB>{0}</RefinedPDB>\n".format(oppdb))
+        f.write(" <Cycles>\n")
+
     def write_xml_results_end(self, f):
         """
         Write the ending lines for XML output
@@ -770,22 +893,28 @@ class ResultsByCycle:
         *f*
             file object
         """
-        f.write(' </Cycles>\n')
-        f.write(' <Final>\n')
-        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'
-                .format(self.cyclerr+1))
-        f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
-        f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
-        f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
-        f.write('   <OverlapMap>{0}</OverlapMap>\n'.format(self.mapmdlfrac))
-        f.write('   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n'
-                .format(self.mapmdlfrac_reso))
-        f.write('   <OverlapModel>{0}</OverlapModel>\n'
-                .format(self.mdlmapfrac))
-        f.write('   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n'
-                .format(self.mdlmapfrac_reso))
-        f.write(' </Final>\n')
-        f.write('</SheetbendResult>\n')
+        f.write(" </Cycles>\n")
+        f.write(" <Final>\n")
+        f.write(
+            "   <RegularizeNumber>{0}</RegularizeNumber>\n".format(self.cyclerr + 1)
+        )
+        f.write("   <Number>{0}</Number>\n".format(self.cycle + 1))
+        f.write("   <Resolution>{0}</Resolution>\n".format(self.resolution))
+        f.write("   <Radius>{0}</Radius>\n".format(self.radius))
+        f.write("   <OverlapMap>{0}</OverlapMap>\n".format(self.mapmdlfrac))
+        f.write(
+            "   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n".format(
+                self.mapmdlfrac_reso
+            )
+        )
+        f.write("   <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
+        f.write(
+            "   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n".format(
+                self.mdlmapfrac_reso
+            )
+        )
+        f.write(" </Final>\n")
+        f.write("</SheetbendResult>\n")
 
     def write_xml_results_cyc(self, f):
         """
@@ -794,31 +923,47 @@ class ResultsByCycle:
         *f*
             file object
         """
-        f.write('  <Cycle>\n')
-        f.write('   <RegularizeNumber>{0}</RegularizeNumber>\n'
-                .format(self.cyclerr+1))
-        f.write('   <Number>{0}</Number>\n'.format(self.cycle+1))
-        f.write('   <Resolution>{0}</Resolution>\n'.format(self.resolution))
-        f.write('   <Radius>{0}</Radius>\n'.format(self.radius))
-        f.write('   <OverlapMap>{0}</OverlapMap>\n'.format(self.mapmdlfrac))
-        f.write('   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n'
-                .format(self.mapmdlfrac_reso))
-        f.write('   <OverlapModel>{0}</OverlapModel>\n'
-                .format(self.mdlmapfrac))
-        f.write('   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n'
-                .format(self.mdlmapfrac_reso))
-        f.write('  </Cycle>\n')
+        f.write("  <Cycle>\n")
+        f.write(
+            "   <RegularizeNumber>{0}</RegularizeNumber>\n".format(self.cyclerr + 1)
+        )
+        f.write("   <Number>{0}</Number>\n".format(self.cycle + 1))
+        f.write("   <Resolution>{0}</Resolution>\n".format(self.resolution))
+        f.write("   <Radius>{0}</Radius>\n".format(self.radius))
+        f.write("   <OverlapMap>{0}</OverlapMap>\n".format(self.mapmdlfrac))
+        f.write(
+            "   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n".format(
+                self.mapmdlfrac_reso
+            )
+        )
+        f.write("   <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
+        f.write(
+            "   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n".format(
+                self.mdlmapfrac_reso
+            )
+        )
+        f.write("  </Cycle>\n")
 
 
 class Profile:
-    '''
+    """
     Profiling class to measure elapsed time
-    '''
-    def __init__(self):
+    """
+
+    def __init__(self):  # , filename=None, append=True):
+        # self.fout = None
+        # if filename:
+        #    self.set_file(filename, append)
         self.prof = OrderedDict()
         self.start_T = 0.0
         self.end_T = 0.0
         self.id = None
+
+    # def set_file(self, filename, append=True):
+    #    try:
+    #        self.fout = open(filename, "a" if append else "w")
+    #    except:
+    #        print(f"Error: Cannot open {filename} for writing.")
 
     def start(self, id):
         self.id = id
@@ -835,5 +980,15 @@ class Profile:
     def profile_log(self):
         if self.prof:
             for k, v in self.prof.items():
-                print('{0} : {1:.6f} s'.format(k, v))
+                print("{0} : {1:.6f} s".format(k, v))
 
+    # def write(self, line, end="\n", flush=True, f)
+
+
+# singleton for profile
+# _profile = Profile()
+# set_file = _profile.set_file
+# start = _profile.start
+# end = _profile.end
+# write = _profile.write
+# close = _profile.close
