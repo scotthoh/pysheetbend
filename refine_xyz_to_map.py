@@ -11,7 +11,6 @@ import sys
 import datetime
 from timeit import default_timer as timer
 import logging
-from scipy.ndimage.measurements import maximum
 from scipy.interpolate import RegularGridInterpolator
 from scipy.signal import fftconvolve
 
@@ -169,8 +168,8 @@ def main():
     # res = 2/rec_cell[i]/grid_shape[i] for i in (0,1,2)
     # nyq_res = max(res)
     # nyquist_res = maximum([2.0 * apix0[i] for i in (0, 1, 2)])
-    nyquist_res = maximum(2.0 * apix0)
-    min_d = maximum(apix0)
+    nyquist_res = np.maximum(2.0 * apix0)
+    min_d = np.maximum(apix0)
 
     if res > 0.0 and res > nyquist_res:
         samp_rate = res / (2 * min_d)
