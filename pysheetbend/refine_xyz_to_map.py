@@ -168,8 +168,8 @@ def main():
     # res = 2/rec_cell[i]/grid_shape[i] for i in (0,1,2)
     # nyq_res = max(res)
     # nyquist_res = maximum([2.0 * apix0[i] for i in (0, 1, 2)])
-    nyquist_res = np.maximum(2.0 * apix0)
-    min_d = np.maximum(apix0)
+    nyquist_res = np.amax(2.0 * apix0)
+    min_d = np.amax(apix0)
 
     if res > 0.0 and res > nyquist_res:
         samp_rate = res / (2 * min_d)
@@ -354,11 +354,9 @@ def main():
             dmapin_t = scorer.calculate_map_threshold(downsamp_map)
             mapcurreso_t = scorer.calculate_map_threshold(scl_map)
             # print("Calculated input map volume threshold is ", end="")
-            logger.info("Calculated input map volume threshold is ")
-            logger.info(
-                "{0:.2f} and {1:.2f} (current resolution).".format(
-                    dmapin_t, mapcurreso_t
-                )
+            m = "Calculated input map volume threshold is "
+            m += "{0:.2f} and {1:.2f} (current resolution).\n".format(
+                dmapin_t, mapcurreso_t
             )
             # calculate model contour
             # t = 2.5 if rcyc > 10.0 else 2.0 if rcyc > 6.0 else 1.5
@@ -366,10 +364,9 @@ def main():
             # fltrcmap_t = t*scl_cmap.std() #np.std(scl_cmap.fullMap)
             fltrcmap_t = scorer.calculate_map_threshold(scl_cmap)
             # print("Calculated model threshold is ", end="")
-            logger.info("Calculated model threshold is ")
-            logger.info(
-                "{0:.2f} and {1:.2f} (current resolution)".format(cmap_t, fltrcmap_t)
-            )
+            m += "Calculated model threshold is "
+            m += "{0:.2f} and {1:.2f} (current resolution)\n".format(cmap_t, fltrcmap_t)
+            logger.info(m)
             ovl_map1, ovl_mdl1 = scorer.calculate_overlap_scores(
                 downsamp_map, cmap, dmapin_t, cmap_t
             )
@@ -380,17 +377,14 @@ def main():
             if verbose >= 1:
                 end = timer()
                 print("Score mod: {0} s".format(end - start))
-            logger.info("TEMPys scores :")
             # print("Fraction of map overlapping with model: ", end="")
-            logger.info("Fraction of map overlapping with model: ")
-            logger.info(
-                "{0:.3f} and {1:.3f} (current resolution)".format(ovl_map1, ovl_map2)
-            )
+            m = "TEMPy scores :\n"
+            m += " Fraction of map overlapping with model: "
+            m += "{0:.3f} and {1:.3f} (current resolution)\n".format(ovl_map1, ovl_map2)
             # print("Fraction of model overlapping with map: ", end="")
-            logger.info("Fraction of model overlapping with map: ")
-            logger.info(
-                "{0:.3f} and {1:.3f} (current resolution)".format(ovl_mdl1, ovl_mdl2)
-            )
+            m += " Fraction of model overlapping with map: "
+            m += "{0:.3f} and {1:.3f} (current resolution)\n".format(ovl_mdl1, ovl_mdl2)
+            logger.info(m)
             if refxyz:
                 print("REFINE XYZ")
                 timelog.start("Shiftfield")
