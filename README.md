@@ -2,6 +2,8 @@
 ## A python implementation of SHEETBEND.
 ### Sheetbend - model morphing by shift field refinement
 
+### *Still Under Development*
+
 ### Description:
 *Sheetbend* performs model morphing by shift field refinement. This is a very fast form of preliminary refinement which can be applied
 as a precursor to conventional refinement. It can be applied at any resolutions, and when used at low resolution is particularly suited
