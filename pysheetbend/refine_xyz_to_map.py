@@ -269,11 +269,30 @@ def main():
             # better gridshapes.
             # don't have to use lowpass as it doesn't affect results much
             spacing = rcyc / (2 * samp_rate)
+            # print(f"mapin spacing, grid : {mapin.apix}; {mapin.fullMap.shape}")
+            # print(f"cell : {cell.a}, {cell.b}, {cell.c}")
             logger.info(f"Calculated spacing : {spacing}")
             downsamp_shape, spacing = sf_util.calc_best_grid_apix(
                 spacing, (cell.a, cell.b, cell.c)
             )
-            downsamp_map = mapin.downsample_map(spacing, downsamp_shape)
+            # start = timer()
+            # resample runs faster
+            logger.info("resample by box size")
+            timelog.start("Resample")
+            downsamp_map = mapin.resample_by_box_size(downsamp_shape)
+            timelog.end("Resample")
+
+            # end = timer()
+            # print(f"resample time : {end-start}")
+            # print(resample_map.fullMap.shape)
+            # print(resample_map.apix)
+            # start = timer()
+            # logger.info("downsample_map")
+            # timelog.start("Downsample map")
+            # downsamp_map = mapin.downsample_map(spacing, downsamp_shape)
+            # timelog.end("Downsample map")
+            # end = timer()
+            # print(f"downsample time = {end-start}")
             downsamp_map.update_header()
             downsamp_shape = downsamp_map.fullMap.shape
             downsamp_apix = downsamp_map.apix
@@ -302,6 +321,7 @@ def main():
             timelog.start("MapDensity")
             # cmap = downsamp_map.copy()
             # cmap.fullMap = cmap.fullMap * 0
+
             cmap = structure.calculate_rho(2.5, downsamp_map)
             timelog.end("MapDensity")
             # if verbose >= 1:
@@ -318,6 +338,7 @@ def main():
             if verbose >= 1:
                 start = timer()
             timelog.start("DiffMap")
+            logger.info("test1")
             scl_map, scl_cmap, dmap = DFM.get_diffmap12(
                 downsamp_map,
                 cmap,
@@ -376,7 +397,7 @@ def main():
             timelog.end("Scoring")
             if verbose >= 1:
                 end = timer()
-                print("Score mod: {0} s".format(end - start))
+                logger.info("Score mod: {0} s".format(end - start))
             # print("Fraction of map overlapping with model: ", end="")
             m = "TEMPy scores :\n"
             m += " Fraction of map overlapping with model: "
@@ -386,11 +407,11 @@ def main():
             m += "{0:.3f} and {1:.3f} (current resolution)\n".format(ovl_mdl1, ovl_mdl2)
             logger.info(m)
             if refxyz:
-                print("REFINE XYZ")
+                logger.info("REFINE XYZ")
                 timelog.start("Shiftfield")
                 # print(f'maps dtype, lpcmap : {scl_cmap.fullMap.dtype}')
                 # print(f'mmap dtype : {mmap.fullMap.dtype}')
-                print(f"dmap dtype : {dmap.fullMap.dtype}")
+                logger.info(f"dmap dtype : {dmap.fullMap.dtype}")
                 x1m, x2m, x3m = shiftfield.shift_field_coord(
                     scl_cmap.fullMap,
                     dmap.fullMap,

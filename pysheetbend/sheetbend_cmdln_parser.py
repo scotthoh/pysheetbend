@@ -95,6 +95,16 @@ class SheetbendParser:
         )
 
         outfiles.add_argument(
+            "--mapout",
+            type=str,
+            dest="mapout",
+            help="Output map filename.",
+            metavar="Output_map",
+            default="sheetbend_mapout_result.pdb",
+            required=False,
+        )
+
+        outfiles.add_argument(
             "--xmlout",
             type=str,
             dest="xmlout",

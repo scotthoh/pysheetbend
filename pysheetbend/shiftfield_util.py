@@ -179,6 +179,21 @@ def largest_prime_factor(n):
     return n
 
 
+def grid_coord_to_frac(densmap):
+    """
+    convert grid coordinates to fractional coordinates at the given grid_shape
+    TEMPy em map box_size is ZYX format
+    """
+    zpos, ypos, xpos = np.mgrid[
+        0 : densmap.z_size(), 0 : densmap.y_size(), 0 : densmap.x_size()
+    ]
+    zyx_pos = np.vstack([zpos.ravel(), ypos.ravel(), xpos.ravel()]).T
+    # get coord position
+    # zyx_pos_new = (zyx_pos * densmap.apix) + np.array([z0, y0, x0])
+    frac_coord = zyx_pos[:] / np.array(densmap.box_size())
+    return frac_coord, zyx_pos
+
+
 def calc_best_grid_apix(spacing, cellsize):
     out_grid = []
     grid_shape = (
@@ -884,6 +899,18 @@ class ResultsByCycle:
         f.write("<SheetbendResult>\n")
         f.write(" <Title>{0}</Title>\n".format(os.path.basename(ippdb)))
         f.write(" <RefinedPDB>{0}</RefinedPDB>\n".format(oppdb))
+        f.write(" <Cycles>\n")
+
+    def write_xml_results_start_map(self, f, mapout, mapin):
+        """
+        Write the starting lines for XML output for map refinement
+        Arguments:
+        *f*
+            file object
+        """
+        f.write("<SheetbendResult>\n")
+        f.write(" <Title>{0}</Title>\n".format(os.path.basename(mapin)))
+        f.write(" <FinalMap>{0}</FinalMap>\n".format(mapout))
         f.write(" <Cycles>\n")
 
     def write_xml_results_end(self, f):
