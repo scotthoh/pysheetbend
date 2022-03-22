@@ -5,7 +5,8 @@ York Structural Biology Laboratory
 License: ?
 """
 import argparse
-from __init__ import __version__
+
+# from pysheetbend import __version__
 
 
 class SheetbendParser:
@@ -291,7 +292,7 @@ class SheetbendParser:
         misc.add_argument(
             "--version",
             action="version",
-            version="%(prog)s {0}".format(__version__),
+            version="%(prog)s {0}".format("test"),
         )
 
         misc.add_argument(

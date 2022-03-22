@@ -133,6 +133,17 @@ def get_diffmap12(
         # print(emmap1.fullMap.shape, emmap2.fullMap.shape)
         # print(emmap1.origin, emmap2.origin)
         mapcompare.compare_grid(emmap1, emmap2)
+        assert emmap1.compare_tuple(emmap1.fullMap.shape, emmap2.fullMap.shape)
+        assert emmap1.compare_tuple(emmap1.origin, emmap2.origin)
+        if isinstance(emmap1.apix, tuple):
+            if isinstance(emmap2.apix, tuple):
+                assert emmap1.compare_tuple(emmap1.apix, emmap2.apix)
+            else:
+                assert emmap1.apix[0] == emmap2.apix
+        elif isinstance(emmap2.apix, tuple):
+            assert emmap2.apix[0] == emmap1.apix
+        else:
+            assert emmap1.apix == emmap2.apix
         # print("Map dimension are the same.")
         samegrid = True
     except AssertionError:

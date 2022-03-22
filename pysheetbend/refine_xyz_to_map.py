@@ -3,7 +3,7 @@ Python implementation of csheetbend to perform shift field refinement
 Copyright 2018 Kevin Cowtan & University of York all rights reserved
 Author: Soon Wen Hoh, University of York 2020
 
-License: ?
+License: GNU LESSER GENERAL PUBLIC LICENSE v2.1
 """
 
 from __future__ import print_function  # python 3 proof
@@ -13,6 +13,7 @@ from timeit import default_timer as timer
 import logging
 from scipy.interpolate import RegularGridInterpolator
 from scipy.signal import fftconvolve
+from utils.logger import log2file
 
 #
 
@@ -45,18 +46,14 @@ from TEMPy.map_process import array_utils
 # tracemalloc
 # tracemalloc.start()
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-fh = logging.FileHandler("pysheetbend.log")
-fh.setLevel(logging.INFO)
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-formatter = logging.Formatter("%(message)s")
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-logger.addHandler(fh)
-logger.addHandler(ch)
-
+orig_stdout = sys.stdout
+orig_stderr = sys.stderr
+logging.basicConfig(
+    level=logging.DEBUG, filename="pysheetbend.log", filemode="a", format="%(message)s"
+)
+log = logging.getLogger(__name__)
+sys.stdout = log2file(log, logging.INFO, orig_stdout)
+sys.stderr = log2file(log, logging.INFO, orig_stdout)
 
 # @profile
 def main():
