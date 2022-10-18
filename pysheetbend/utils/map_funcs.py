@@ -21,21 +21,30 @@ class functionType(Enum):
     QUADRATIC = 2
 
 
-def map_grid_position_array(grid_info, structure, index=True):
+def map_grid_position_array(grid_info, structure, index=False):
     xyz_coordinates = []
     origin = np.array((grid_info.origin[0], grid_info.origin[1], grid_info.origin[2]))
     apix = np.array(
         (grid_info.voxel_size[0], grid_info.voxel_size[1], grid_info.voxel_size[2])
     )
     # print(origin, apix)
-    out = np.zeros(3, dtype=np.int16)
+    # out = np.zeros(3, dtype=np.int16)
     for cra in structure[0].all():
         xyz = np.array((cra.atom.pos.x, cra.atom.pos.y, cra.atom.pos.z))
         if index:
-            xyz = np.around((xyz - origin) / apix, 0, out)
+            xyz = np.round((xyz - origin) / apix, 0)
             # xyz = (np.round(((xyz - origin) / apix, 0))).astype(int)
         else:
             xyz = (xyz - origin) / apix
+        # check if coordinates are within boundary
+        if (xyz > grid_info.grid_shape[0] - 1).any():
+            xyz = np.round(xyz, 0)
+            # check again if over then apply periodic boundary
+            if (xyz > grid_info.grid_shape[0] - 1).any():
+                for i in xyz:
+                    if i > grid_info.grid_shape[0]:
+                        i -= grid_info.grid_shape[0]
+                # raise ValueError('Atom position in ')
         xyz_coordinates.append([xyz[0], xyz[1], xyz[2]])
     # print(xyz_coordinates)
     return xyz_coordinates

@@ -573,7 +573,7 @@ def main(args):
                 interp_x2 = RegularGridInterpolator((xg, yg, zg), x2m)
                 interp_x3 = RegularGridInterpolator((xg, yg, zg), x3m)
                 count = 0
-                v = map_funcs.map_grid_position_array(gridshape, structure)
+                v = map_funcs.map_grid_position_array(gridshape, structure, False)
                 # print(xg, yg, zg)
                 # v = np.flip(v, 1)
                 # scaling for shifts use 1 (em) instead of 2 (xtal)
@@ -586,6 +586,7 @@ def main(args):
                 index = 0
                 for cra in structure[0].all():
                     cra.atom.pos += gemmi.Position(dx[index], dy[index], dz[index])
+                    index += 1
                 # for i in range(len(structure)):
                 #    if verbose >= 2:
                 #        shift_vars.append(
@@ -604,7 +605,7 @@ def main(args):
             if pseudoreg == "yes":
                 # logger.info("PSEUDOREGULARIZE")
                 timelog.start("INTPSEUDOREG")
-                structure = preg.regularize_frag(structure)
+                preg.regularize_frag(structure)
                 timelog.end("INTPSEUDOREG")
             # U-isotropic refinement
             if refuiso or (postrefuiso and lastcyc):
@@ -676,16 +677,16 @@ def main(args):
         if pseudoreg == "postref":
             # logger.info("PSEUDOREGULARIZE")
             timelog.start("PSEUDOREG")
-            structure = preg.regularize_frag(structure)
+            preg.regularize_frag(structure)
             timelog.end("PSEUDOREG")
             timelog.start("MapDensity")
             # cmap = mapin.copy()
             # cmap.fullMap = cmap.fullMap * 0
-            cmap = structure.calculate_rho(2.5, mapin)
+            # cmap = structure.calculate_rho(2.5, mapin)
             # cmap = emc.calc_map_density(mapin, structure)
             timelog.start("MapDensity")
             timelog.start("Scoring")
-            cmap_t = 1.5 * cmap.std()
+            # cmap_t = 1.5 * cmap.std()
             ##ovl_mapf, ovl_mdlf = scorer.calculate_overlap_scores(
             ##    mapin, cmap, mapin_t, cmap_t
             ##)
