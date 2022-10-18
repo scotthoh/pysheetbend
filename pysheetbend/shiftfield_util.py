@@ -1,20 +1,21 @@
 # Utily functions for shiftfield code
 # S.W.Hoh, University of York, 2020
 
+from __future__ import annotations
 import os
 import math
 from timeit import default_timer as timer
 from collections import OrderedDict
 import numpy as np
 
-
+'''
 from TEMPy.Vector import Vector as Vector
 from TEMPy.EMMap import Map
 from TEMPy.StructureParser import mmCIFParser as cifp
 from TEMPy.StructureParser import PDBParser as pdbp
 from TEMPy.ProtRep_Biopy import BioPy_Structure as BPS
 from TEMPy.MapParser import MapParser as mp
-
+'''
 """
 # from time import perf_counter
 from TEMPy.math.vector import Vector
@@ -73,6 +74,21 @@ def get_structure(ippdb, hetatom=False, verbose=0):
             break
 
     return struc, hetatm_present
+
+
+def match_model_map_unitcell(model, map):
+    model_cell = np.array(model.cell.parameters)
+    map_cell = np.array(map.unit_cell.parameters)
+    if not bool(np.asarray(model_cell == map_cell).all()):
+        print('Match model map unit cell')
+        model.cell.set(
+            map.unit_cell.a,
+            map.unit_cell.b,
+            map.unit_cell.c,
+            map.unit_cell.alpha,
+            map.unit_cell.beta,
+            map.unit_cell.gamma,
+        )
 
 
 def has_converged(model0, model1, coor_tol, bfac_tol):
@@ -194,12 +210,24 @@ def grid_coord_to_frac(densmap):
     return frac_coord, zyx_pos
 
 
-def calc_best_grid_apix(spacing, cellsize):
+def calc_best_grid_apix(spacing, cellsize, verbose=0):
+    '''
+    Return best nearest grid and pixel size to input
+    Arguments:
+        spacing: numpy 1D array of pixel size X,Y,Z dimension
+        cellsize: numpy 1D array of X,Y,Z cell size Angstroms
+        verbose: verbosity, default=0
+    Return:
+        grid_shape, pixel_size: 1D arrays of (X,Y,Z)
+    '''
+    if not isinstance(spacing, np.ndarray):
+        spacing = np.array((spacing, spacing, spacing), dtype=np.float32)
+
     out_grid = []
     grid_shape = (
-        int(round(cellsize[2] / spacing)),  # z
-        int(round(cellsize[1] / spacing)),  # y
-        int(round(cellsize[0] / spacing)),  # x
+        int(round(cellsize[0] / spacing[0])),
+        int(round(cellsize[1] / spacing[1])),
+        int(round(cellsize[2] / spacing[2])),
     )
     grid_same = True
     for dim in grid_shape:
@@ -218,42 +246,51 @@ def calc_best_grid_apix(spacing, cellsize):
         newapix = []
         for i in range(0, 3):
             newapix.append(float(cellsize[i]) / float(out_grid[i]))
-        if newapix[0] == newapix[1] == newapix[2]:
-            newapix = newapix[0]
+        # if newapix[0] == newapix[1] == newapix[2]:
+        #    newapix = newapix[0]
     else:
-        newapix = spacing
+        newapix = spacing  # np.array((newapix, newapix, newapix), dtype=np.float32)
     # check if newapix is larger than apix
     # for i in range(0, 3):
     #    if newapix[i] < apix[i]:
-    print(f"new apix, grid : {newapix}, {out_grid}")
+    if verbose > 1:
+        print(f'new apix, {newapix}')
+        print(f'New grid shape, {out_grid}')
     return out_grid, newapix
 
 
-def plan_fft(grid_dim):
+def plan_fft(grid_dim: 'GridInfo', input_dtype=np.float32):
     """
     Returns fft object. Plan fft
     Arguments
     *grid_dim*
       grid shape of map
     """
-    output_shape = grid_dim.g_reci
+    output_shape = grid_dim.grid_reci
+    output_dtype = np.complex64
+    # if input_dtype == np.float32:
+    #    output_dtype = np.complex64
+    if input_dtype == np.float64:
+        output_dtype = np.complex128
     # need to add scipy fft if pyfftw not imported
     try:
         if not pyfftw_flag:
             raise ImportError
 
         input_arr = pyfftw.empty_aligned(
-            grid_dim.g_real,
-            # dtype='float32', n=16)
-            dtype="float64",
+            grid_dim.grid_shape,
+            dtype=input_dtype,
             n=16,
         )
+        # dtype=np.float64,
+        # n=16,
         output_arr = pyfftw.empty_aligned(
             output_shape,
-            # dtype='complex64', n=16)
-            dtype="complex128",
+            dtype=output_dtype,
             n=16,
         )
+        # dtype=np.complex128,
+        # n=16,
         # fft planning
         fft = pyfftw.FFTW(
             input_arr,
@@ -268,24 +305,33 @@ def plan_fft(grid_dim):
     return fft
 
 
-def plan_ifft(grid_dim):
+def plan_ifft(grid_dim: 'GridInfo', input_dtype=np.complex64):
     """
     Returns ifft object. Plan ifft
     Arguments
     *grid_dim*
       grid shape of map
     """
-    output_shape = grid_dim.g_real
+    output_shape = grid_dim.grid_shape
+    output_dtype = np.float32
+    # if input_dtype == np.complex64:
+    #    output_dtype = np.float32
+    if input_dtype == np.complex128:
+        output_dtype = np.float64
     # need to add scipy fft if pyfftw not imported
     try:
         if not pyfftw_flag:
             raise ImportError
-        input_arr = pyfftw.empty_aligned(grid_dim.g_reci, dtype="complex128", n=16)
-        # dtype='complex64', n=16)
+        input_arr = pyfftw.empty_aligned(
+            grid_dim.grid_reci,
+            dtype=input_dtype,
+            n=16,
+        )
+        # dtype=np.float32, n=16)
         output_arr = pyfftw.empty_aligned(
             output_shape,
             # dtype='float32', n=16)
-            dtype="float64",
+            dtype=output_dtype,
             n=16,
         )
         # ifft planning,
@@ -660,7 +706,7 @@ class RadialFilter:
             if self.sum_r[i] > 0.99 * self.sum_r[self.nrad - 1]:
                 break
         self.rad = self.drad * (float(i) + 1.0)
-        self.fltr_data_r = np.zeros(self.gridshape.grid_sam, dtype="float64")
+        self.fltr_data_r = np.zeros(self.gridshape.grid_sam, dtype=np.float64)
         f000 = 0.0
         # z,y,x convention
         origin = np.array([densmap.origin[2], densmap.origin[1], densmap.origin[0]])
@@ -802,16 +848,16 @@ class RadialFilter:
           ifft object
         """
         # copy map data and filter data
-        data_r = np.zeros(self.gridshape.grid_sam, dtype="float64")
+        data_r = np.zeros(self.gridshape.grid_sam, dtype=np.float64)
         data_r = data_arr.copy()
-        fltr_input = np.zeros(self.gridshape.grid_sam, dtype="float64")
+        fltr_input = np.zeros(self.gridshape.grid_sam, dtype=np.float64)
         fltr_input = self.fltr_data_r.copy()
 
         if self.verbose >= 1:
             start = timer()
         # create complex data array
-        fltr_data_c = np.zeros(self.gridshape.g_reci, dtype="complex128")
-        data_c = np.zeros(self.gridshape.g_reci, dtype="complex128")
+        fltr_data_c = np.zeros(self.gridshape.g_reci, dtype=np.complex128)
+        data_c = np.zeros(self.gridshape.g_reci, dtype=np.complex128)
         # fourier transform of filter data
         fltr_data_c = fft_obj(fltr_input, fltr_data_c)
         fltr_data_c = fltr_data_c.conjugate().copy()
@@ -859,9 +905,7 @@ class ResultsByCycle:
         resolution,
         radius,
         mapmdlfrac,
-        mapmdlfrac_reso,
         mdlmapfrac,
-        mdlmapfrac_reso,
         fscavg,
     ):
         """
@@ -872,9 +916,7 @@ class ResultsByCycle:
         self.resolution = resolution
         self.radius = radius
         self.mapmdlfrac = mapmdlfrac
-        self.mapmdlfrac_reso = mapmdlfrac_reso
         self.mdlmapfrac = mdlmapfrac
-        self.mdlmapfrac_reso = mdlmapfrac_reso
         self.fscavg = fscavg
 
     """
@@ -929,17 +971,7 @@ class ResultsByCycle:
         f.write("   <Resolution>{0}</Resolution>\n".format(self.resolution))
         f.write("   <Radius>{0}</Radius>\n".format(self.radius))
         f.write("   <OverlapMap>{0}</OverlapMap>\n".format(self.mapmdlfrac))
-        f.write(
-            "   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n".format(
-                self.mapmdlfrac_reso
-            )
-        )
         f.write("   <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
-        f.write(
-            "   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n".format(
-                self.mdlmapfrac_reso
-            )
-        )
         f.write(" </Final>\n")
         f.write("</SheetbendResult>\n")
 
@@ -958,17 +990,7 @@ class ResultsByCycle:
         f.write("   <Resolution>{0}</Resolution>\n".format(self.resolution))
         f.write("   <Radius>{0}</Radius>\n".format(self.radius))
         f.write("   <OverlapMap>{0}</OverlapMap>\n".format(self.mapmdlfrac))
-        f.write(
-            "   <OverlapMapAtResolution>{0}</OverlapMapAtResolution>\n".format(
-                self.mapmdlfrac_reso
-            )
-        )
         f.write("   <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
-        f.write(
-            "   <OverlapModelAtResolution>{0}</OverlapModelAtResolution>\n".format(
-                self.mdlmapfrac_reso
-            )
-        )
         f.write("  </Cycle>\n")
 
 

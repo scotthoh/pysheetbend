@@ -5,8 +5,9 @@ York Structural Biology Laboratory
 License: ?
 """
 import argparse
+import platform
 
-# from pysheetbend import __version__
+from pysheetbend import __version__
 
 
 class SheetbendParser:
@@ -17,11 +18,17 @@ class SheetbendParser:
     def __init__(self, args=None):
         self.args = args
 
-    def get_args(self):
+    def add_args(self, parser):
         """
         Parse input arguments
         """
-        parser = argparse.ArgumentParser(prog="sheetbend")
+        # parser = argparse.ArgumentParser()
+        parser.prog = "PySheetbend"
+        parser.description = """Shift-field refinement of macromolecular
+        atomic models for cryo-EM data."""
+        # parser = parser.add_parsers(dest="command")
+        # parser.add_parser("refine_model_to_map")
+        # parser.add_parser("refine_map_to_map")
 
         infiles = parser.add_argument_group("Input Files")
         infiles.add_argument(
@@ -290,9 +297,12 @@ class SheetbendParser:
 
         misc = parser.add_argument_group("Others")
         misc.add_argument(
+            "-v",
             "--version",
             action="version",
-            version="%(prog)s {0}".format("test"),
+            version="%(prog)s {pysheetbend} with Python {python}".format(
+                pysheetbend=__version__, python=platform.python_version()
+            ),
         )
 
         misc.add_argument(
@@ -305,7 +315,11 @@ class SheetbendParser:
             required=False,
         )
 
-        self.args = parser.parse_args()
+    def parse_args(self, arg_list):
+        parser = argparse.ArgumentParser()
+        self.add_args(parser)
+        self.args = parser.parse_args(arg_list)
+        return self.args
 
     def print_args(self):
         """

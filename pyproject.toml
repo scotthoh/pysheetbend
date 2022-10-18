@@ -1,0 +1,10 @@
+[build-systems]
+dependencies = [
+    "setuptools",
+    "numpy >=1.15 ",
+    "numba",
+    "pandas >=0.24.2 ",
+    "emda",
+    "gemmi >= 0.5.7",
+]
+build-backend = "setuptools.build_meta"

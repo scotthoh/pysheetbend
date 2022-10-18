@@ -12,8 +12,8 @@ from timeit import default_timer as timer
 from numba import njit
 from math import fabs
 
-from TEMPy.EMMap import Map
-from TEMPy.Vector import Vector
+# from TEMPy.EMMap import Map
+# from TEMPy.Vector import Vector
 
 # from TEMPy.maps.em_map import Map
 from numpy import linalg
@@ -22,6 +22,8 @@ from numpy import linalg
 
 # from numpy.linalg.linalg import solve
 import numpy.ma as ma
+
+# from memory_profiler import profile
 
 # using numba here
 
@@ -56,9 +58,6 @@ def effective_radius(func, radius):
         sum_r[i] = r * r * fabs(fltr(r, radius, func))
         if i >= 1:
             sum_r[i] += sum_r[i - 1]
-
-    # for i in range(1, nrad):
-    #    sum_r[i] += sum_r[i-1]
 
     for i in range(0, nrad):
         if sum_r[i] > 0.99 * sum_r[nrad - 1]:
@@ -99,8 +98,6 @@ def prepare_filter(radcyc, function, g_reci, g_sam, g_half, origin, apix, array_
       reference density map
     """
     verbose = 0
-    fltr_rad = radcyc
-    func = function
     # g_reci = np.array(g_reci)
     # g_sam = np.array(g_sam)
     # g_half = np.array(g_half)
@@ -115,52 +112,58 @@ def prepare_filter(radcyc, function, g_reci, g_sam, g_half, origin, apix, array_
     # determine effective radius of radial function
     # self.gridshape = GridDimension(densmap)
     start = timer()
-    rad = effective_radius(function, fltr_rad)
+    rad = effective_radius(function, radcyc)
     end = timer()
     print("Effective radius : {0}s".format(end - start))
-    fltr_data_r = np.zeros(g_sam, dtype="float64")
-    # fltr_data_r = np.zeros(g_sam, dtype='float32')
+    # fltr_data_r = np.zeros(g_sam, dtype=np.float64)
+    fltr_data_r = np.zeros(g_sam, dtype=np.float32)
 
-    # z,y,x convention
+    # x,y,z convention
     # origin = np.array((origin[2], origin[1], origin[0]))
     if isinstance(apix, tuple):
-        apix = np.array([apix[2], apix[1], apix[0]])
-    else:
+        apix = np.array([apix[0], apix[1], apix[2]])
+    elif not isinstance(apix, np.ndarray):
         apix = np.array([apix, apix, apix])
     # g_half = (g_real[0]//2, g_real[1]//2, g_real[0]//2+1)
     # SB = StructureBlurrer()
     # gt = SB.maptree(densmap)
-    print("1")
-    nz, ny, nx = array_shape
-    zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
-    indi = np.vstack([zg.ravel(), yg.ravel(), xg.ravel()]).T
+    # print("1")
+    nx, ny, nz = np.indices(array_shape)
+    # nx, ny, nz = array_shape
+    # xg, yg, zg = np.mgrid[0:nx, 0:ny, 0:nz]
+    indi = np.vstack([nx.ravel(), ny.ravel(), nz.ravel()]).T
     g_sam = np.array(g_sam)
     g_half = np.array(g_half)
-    print("2")
-
     c = indi + g_half  # self.gridshape.g_half
-    print("2a")
-    c1 = cor_mod1(c, g_sam) - g_half
-    print("2b")
-
-    pos = c1[:] * apix + origin
-    print("2c")
-    r = np.sqrt(np.sum(np.square(pos), axis=1))
-    print("2d")
-    r_ind = np.nonzero(r < rad)
-    print("3")
-
+    c = np.fmod(c, g_sam)
+    c_bool = c < 0
+    c[c_bool[:, 0], 0] += g_sam[0]
+    c[c_bool[:, 1], 1] += g_sam[1]
+    c[c_bool[:, 2], 2] += g_sam[2]
+    c -= g_half
+    pos = c[:] * apix + origin
+    r = np.sqrt(np.sum(np.square(pos), axis=1)).reshape(g_sam)
+    r_bool = np.logical_and((r < rad), (r < radcyc))
     start = timer()
-    fltr_data_r, f000 = radial_filter_func(indi, fltr_data_r, r, r_ind, fltr_rad, func)
+
+    if function == 2:
+        rf = pow(1.0 - r[r_bool] / radcyc, 2)
+    elif function == 1:
+        rf = 1.0 - r[r_bool] / radcyc
+    elif function == 0:
+        rf = 1.0
+    fltr_data_r[r_bool] = rf[:]
+    f000 = np.sum(rf)
+    # fltr_data_r, f000 = radial_filter_func(indi, fltr_data_r, r, r_ind, fltr_rad, func)
     end = timer()
     print("Fltr data r : {0}s".format(end - start))
 
     # calc scale factor
-    scale = 1.0 / f000
+    # scale = 1.0 / f000
     if verbose >= 1:
-        print("scale, ", scale, " f000, ", f000)
-    del c1
-    return fltr_data_r, scale
+        print(" f000, ", f000)
+    del c, c_bool
+    return fltr_data_r, f000
 
 
 # @profile
@@ -196,20 +199,23 @@ def mapfilter(data_arr, fltr_data_r, scale, fft_obj, ifft_obj, g_sam, g_reci):
       ifft object
     """
     # copy map data and filter data
-    data_r = np.zeros(g_sam, dtype="float64")
-    # data_r = np.zeros(g_sam, dtype='float32')
+    # data_r = np.zeros(g_sam, dtype=np.float64)
+    # print(data_arr.dtype)
+    # print(fltr_data_r.dtype)
+    # print(fft_obj)
+    data_r = np.zeros(g_sam, dtype=np.float32)
     data_r = data_arr.copy()
-    fltr_input = np.zeros(g_sam, dtype="float64")
-    # fltr_input = np.zeros(g_sam, dtype='float32')
+    # fltr_input = np.zeros(g_sam, dtype=np.float64)
+    fltr_input = np.zeros(g_sam, dtype=np.float32)
     fltr_input = fltr_data_r.copy()
 
     # if self.verbose >= 1:
     #    start = timer()
     # create complex data array
-    fltr_data_c = np.zeros(g_reci, dtype="complex128")
-    data_c = np.zeros(g_reci, dtype="complex128")
-    # fltr_data_c = np.zeros(g_reci, dtype='complex64')
-    # data_c = np.zeros(g_reci, dtype='complex64')
+    # fltr_data_c = np.zeros(g_reci, dtype=np.complex128)
+    # data_c = np.zeros(g_reci, dtype=np.complex128)
+    fltr_data_c = np.zeros(g_reci, dtype=np.complex64)
+    data_c = np.zeros(g_reci, dtype=np.complex64)
     # fourier transform of filter data
     fltr_data_c = fft_obj(fltr_input, fltr_data_c)
     fltr_data_c = fltr_data_c.conjugate().copy()
@@ -269,33 +275,33 @@ def get_indices_zyx(origin, apix, array_shape):
 # @profile
 @njit()
 def gradient_map_calc(xdata_c, g_reci, g_real, ch):
-    ydata_c = np.zeros(xdata_c.shape, dtype="complex128")
-    zdata_c = np.zeros(xdata_c.shape, dtype="complex128")
-    # ydata_c = np.zeros(xdata_c.shape, dtype='complex64')
-    # zdata_c = np.zeros(xdata_c.shape, dtype='complex64')
+    # ydata_c = np.zeros(xdata_c.shape, dtype=np.complex128)
+    # zdata_c = np.zeros(xdata_c.shape, dtype=np.complex128)
+    ydata_c = np.zeros(xdata_c.shape, dtype=np.complex64)
+    zdata_c = np.zeros(xdata_c.shape, dtype=np.complex64)
 
     i = complex(0.0, 1.0)
-    for cz in range(g_reci[0]):  # z
+    for cz in range(g_reci[2]):  # z
         for cy in range(g_reci[1]):  # y
-            for cx in range(g_reci[2]):  # x
-                hkl = hkl_c((cz, cy, cx), ch, g_real)
-                cdata = i * xdata_c[cz, cy, cx]
-                zdata_c[cz, cy, cx] = float((2 * np.pi) * hkl[0]) * cdata
-                ydata_c[cz, cy, cx] = float((2 * np.pi) * hkl[1]) * cdata
-                xdata_c[cz, cy, cx] = float((2 * np.pi) * hkl[2]) * cdata
+            for cx in range(g_reci[0]):  # x
+                hkl = hkl_c((cz, cy, cx), ch, g_real)  # returned index z,y,x
+                cdata = i * xdata_c[cx, cy, cz]
+                zdata_c[cx, cy, cz] = float((2 * np.pi) * hkl[0]) * cdata
+                ydata_c[cx, cy, cz] = float((2 * np.pi) * hkl[1]) * cdata
+                xdata_c[cx, cy, cz] = float((2 * np.pi) * hkl[2]) * cdata
     return zdata_c, ydata_c, xdata_c
 
 
 @njit()
 def gradient_map_iso_calc(data_c, g_reci, g_real, ch, cell):
-    for cz in range(0, g_reci[0]):  # z
+    for cz in range(0, g_reci[2]):  # z
         for cy in range(0, g_reci[1]):  # y
-            for cx in range(0, g_reci[2]):  # x
+            for cx in range(0, g_reci[0]):  # x
                 hkl = hkl_c((cz, cy, cx), ch, g_real)
                 scl = (2 * np.pi * np.pi) * metric_reci_lengthsq(
                     hkl[2], hkl[1], hkl[0], cell
                 )
-                data_c[cz, cy, cx] = scl * data_c[cz, cy, cx]
+                data_c[cx, cy, cz] = scl * data_c[cx, cy, cz]
     return data_c
 
 
@@ -345,16 +351,16 @@ def cor_mod(a, b):
 #  return v
 
 
-def writeMap(data_array, origin, apix, shape, fname):
-    mapobj = Map(
-        np.zeros((shape[2], shape[1], shape[0])),
-        origin,
-        apix,
-        "mapname",
-    )
-    mapobj.fullMap = data_array.copy()
-    mapobj.update_header()
-    mapobj.write_to_MRC_file(fname)
+# def writeMap(data_array, origin, apix, shape, fname):
+#    mapobj = Map(
+#        np.zeros((shape[2], shape[1], shape[0])),
+#        origin,
+#        apix,
+#        "mapname",
+#    )
+#    mapobj.fullMap = data_array.copy()
+#    mapobj.update_header()
+#    mapobj.write_to_MRC_file(fname)
 
 
 # @profile
@@ -384,9 +390,9 @@ def shift_field_coord(
     """
     # tracemalloc.start()
     # set the numbers for the grids in list form
-    g_reci = (cmap.shape[2], cmap.shape[1], cmap.shape[0] // 2 + 1)
+    g_reci = (cmap.shape[0], cmap.shape[1], cmap.shape[2] // 2 + 1)
     # g_real = (g_reci[0], g_reci[1], int(g_reci[2]-1)*2)
-    g_real = (cmap.shape[2], cmap.shape[1], cmap.shape[0])
+    g_real = (cmap.shape[0], cmap.shape[1], cmap.shape[2])
     ch = (g_real[0] // 2, g_real[1] // 2, g_real[2] // 2)
 
     # calculate map coefficients
@@ -398,7 +404,9 @@ def shift_field_coord(
     if verbose >= 1:
         end = timer()
         print("FFT Calc Map : {0} s".format(end - start))
-
+    # print(data_r.dtype)
+    # print(cmap.dtype)
+    # print(xdata_c.dtype)
     # calculate gradient map coefficients
     zdata_c, ydata_c, xdata_c = gradient_map_calc(xdata_c, g_reci, g_real, ch)
 
@@ -407,18 +415,25 @@ def shift_field_coord(
     if verbose >= 1:
         start = timer()
     zdata_c = zdata_c.conjugate().copy()
+    print("zdata_c {0}".format(zdata_c.shape))
     ydata_c = ydata_c.conjugate().copy()
     xdata_c = xdata_c.conjugate().copy()
     if verbose >= 1:
         end = timer()
         print("3x conjugate : {0} s".format(end - start))
-    zdata_r = np.zeros(data_r.shape, dtype="float64")
-    ydata_r = np.zeros(data_r.shape, dtype="float64")
-    xdata_r = np.zeros(data_r.shape, dtype="float64")
-    # zdata_r = np.zeros(data_r.shape, dtype='float32')
-    # ydata_r = np.zeros(data_r.shape, dtype='float32')
-    # xdata_r = np.zeros(data_r.shape, dtype='float32')
-
+    print("data_r shape {0}".format(data_r.shape))
+    # zdata_r = np.zeros(data_r.shape, dtype=np.float64)
+    # ydata_r = np.zeros(data_r.shape, dtype=np.float64)
+    # xdata_r = np.zeros(data_r.shape, dtype=np.float64)
+    zdata_r = np.zeros(data_r.shape, dtype=np.float32)
+    ydata_r = np.zeros(data_r.shape, dtype=np.float32)
+    xdata_r = np.zeros(data_r.shape, dtype=np.float32)
+    print("zdata_r {0}".format(zdata_r.shape))
+    # print("ifftw")
+    # print("output shape")
+    # print(ifft_obj.output_shape)
+    # print(ifft_obj.output_dtype)
+    # print(zdata_r.dtype)
     if verbose >= 1:
         start = timer()
     zdata_r = ifft_obj(zdata_c, zdata_r)
@@ -427,10 +442,10 @@ def shift_field_coord(
         print("first ifft ", end - start)
     ydata_r = ifft_obj(ydata_c, ydata_r)
     xdata_r = ifft_obj(xdata_c, xdata_r)
-    if verbose >= 6:
-        writeMap(xdata_r, origin, apix, cmap.shape, f"gradx1map_{cyc}.map")
-        writeMap(ydata_r, origin, apix, cmap.shape, f"gradx2map_{cyc}.map")
-        writeMap(zdata_r, origin, apix, cmap.shape, f"gradx3map_{cyc}.map")
+    # if verbose >= 6:
+    #    writeMap(xdata_r, origin, apix, cmap.shape, f"gradx1map_{cyc}.map")
+    #    writeMap(ydata_r, origin, apix, cmap.shape, f"gradx2map_{cyc}.map")
+    #    writeMap(zdata_r, origin, apix, cmap.shape, f"gradx3map_{cyc}.map")
 
     # print(x1map.apix, x2map.apix, x3map.apix)
     # print(x1map.origin, x2map.origin, x3map.origin)
@@ -444,8 +459,8 @@ def shift_field_coord(
     # ymap=diffmap , mmap = mask
     # ymap = np.zeros(dmap.shape)
     # mmap = np.zeros(mask.shape)
-    if verbose >= 3:
-        writeMap(dmap, origin, apix, cmap.shape, f"ymap_{cyc}.map")
+    # if verbose >= 3:
+    #    writeMap(dmap, origin, apix, cmap.shape, f"ymap_{cyc}.map")
 
     ymap = dmap.copy()
     # mmap = mask.copy()
@@ -472,6 +487,7 @@ def shift_field_coord(
     x22map = x2map_r * x2map_r
     x23map = x2map_r * x3map_r
     x33map = x3map_r * x3map_r
+    '''
     if verbose >= 6:
         writeMap(x11map, origin, apix, cmap.shape, f"x11map_{cyc}.map")
         writeMap(x12map, origin, apix, cmap.shape, f"x12map_{cyc}.map")
@@ -482,6 +498,7 @@ def shift_field_coord(
         writeMap(y1map, origin, apix, cmap.shape, f"y1map_{cyc}.map")
         writeMap(y2map, origin, apix, cmap.shape, f"y2map_{cyc}.map")
         writeMap(y3map, origin, apix, cmap.shape, f"y3map_{cyc}.map")
+    '''
     # y1map = y1map.astype('float32')
     # y2map = y2map.astype('float32')
     # y3map = y3map.astype('float32')
@@ -507,16 +524,35 @@ def shift_field_coord(
     #    )
     #    writeMap(filt_ymap, origin, apix, cmap.shape, f"filt_ymap{cyc}.map")
     # dmap_gt = SB.maptree(dmap)
-    y1map = mapfilter(y1map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    y2map = mapfilter(y2map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    y3map = mapfilter(y3map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    x11map = mapfilter(x11map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    x12map = mapfilter(x12map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    x13map = mapfilter(x13map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    x22map = mapfilter(x22map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    x23map = mapfilter(x23map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    x33map = mapfilter(x33map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
+    y1map = mapfilter(
+        y1map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    y2map = mapfilter(
+        y2map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    y3map = mapfilter(
+        y3map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    x11map = mapfilter(
+        x11map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    x12map = mapfilter(
+        x12map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    x13map = mapfilter(
+        x13map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    x22map = mapfilter(
+        x22map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    x23map = mapfilter(
+        x23map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    x33map = mapfilter(
+        x33map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
     end = timer()
+    '''
     if verbose >= 6:
         writeMap(x11map, origin, apix, cmap.shape, f"filt_x11map_{cyc}.map")
         writeMap(x12map, origin, apix, cmap.shape, f"filt_x12map_{cyc}.map")
@@ -527,6 +563,7 @@ def shift_field_coord(
         writeMap(y1map, origin, apix, cmap.shape, f"filt_y1map_{cyc}.map")
         writeMap(y2map, origin, apix, cmap.shape, f"filt_y2map_{cyc}.map")
         writeMap(y3map, origin, apix, cmap.shape, f"filt_y3map_{cyc}.map")
+    '''
     print("Filter maps : {0} s".format(end - start))
 
     # x33map1.fullMap = x33map

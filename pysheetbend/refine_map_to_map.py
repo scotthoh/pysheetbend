@@ -20,11 +20,12 @@ from TEMPy.ScoringFunctions import ScoringFunctions
 from TEMPy.MapParser import MapParser as mp
 import numpy as np
 import numpy.ma as ma
-import shiftfield
-import shiftfield_util as sf_util
-import pseudoregularizer
-import map_scaling as DFM
-from sheetbend_cmdln_parser import SheetbendParser
+import pysheetbend.shiftfield
+import pysheetbend.shiftfield_util as sf_util
+import pysheetbend.pseudoregularizer
+import pysheetbend.map_scaling as DFM
+from pysheetbend.sheetbend_cmdln_parser import SheetbendParser
+from memory_profiler import profile
 
 # refine map to map
 
@@ -49,7 +50,7 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 
-# @profile
+@profile
 def main():
     """
     Run main

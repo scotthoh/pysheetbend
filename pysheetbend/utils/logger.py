@@ -1,7 +1,7 @@
 import sys
 
-orig_stdout = sys.stdout
-orig_stderr = sys.stderr
+# orig_stdout = sys.stdout
+# orig_stderr = sys.stderr
 
 
 class log2file(object):
