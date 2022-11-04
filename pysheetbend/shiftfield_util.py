@@ -42,40 +42,6 @@ if sys.version_info[0] > 2:
     from builtins import isinstance
 
 
-def get_structure(ippdb, hetatom=False, verbose=0):
-    """
-    Read structure from file and return BioPy_Structure object
-    Arguments:
-        ippdb: coordinates file path (pdb/mmcif)
-        hetatom: boolean to include hetatoms or not
-        verbose: verbosity
-    """
-    if ippdb is None:
-        print("Please specify path/file for input coordinates.\n")
-        print("Exiting...\n")
-        sys.exit()
-
-    struc_id, file_ext = os.path.basename(ippdb).split(".")
-    if file_ext == "pdb" or file_ext == "ent":
-        structure = pdbp.read_PDB_file(struc_id, ippdb, hetatm=hetatom, water=False)
-    else:
-        structure = cifp.read_mmCIF_file(struc_id, ippdb, hetatm=hetatom, water=False)
-    # reordering residues to make sure residues from same chain are grouped together
-    new_reordered_struct = []
-    chainlist = structure.split_into_chains()
-    for c in chainlist:
-        c.reorder_residues()
-        new_reordered_struct = np.append(new_reordered_struct, c)
-    struc = BPS(new_reordered_struct)
-    hetatm_present = False
-    for atm in struc.atomList:
-        if atm.record_name == "HETATM":
-            hetatm_present = True
-            break
-
-    return struc, hetatm_present
-
-
 def match_model_map_unitcell(model, map):
     model_cell = np.array(model.cell.parameters)
     map_cell = np.array(map.unit_cell.parameters)
@@ -163,28 +129,6 @@ def make_atom_overlay_map1_rad(mapin, prot, gridtree, rad):
     return densMap
 
 
-class GridDimension:
-    """
-    Grid dimensions object
-    """
-
-    def __init__(self, grid_shape):
-        """
-        Sets up grid size in real, reciprocal and half space
-        Arguments
-        *grid_shape*
-          grid_shape
-        """
-        self.grid_sam = grid_shape
-        self.g_reci = (self.grid_sam[0], self.grid_sam[1], self.grid_sam[2] // 2 + 1)
-        self.g_real = (self.grid_sam[0], self.grid_sam[1], self.grid_sam[2])
-        self.g_half = (
-            self.grid_sam[0] // 2,
-            self.grid_sam[1] // 2,
-            self.grid_sam[2] // 2,
-        )
-
-
 def largest_prime_factor(n):
     i = 2
     while i * i <= n:
@@ -193,21 +137,6 @@ def largest_prime_factor(n):
         else:
             n //= i
     return n
-
-
-def grid_coord_to_frac(densmap):
-    """
-    convert grid coordinates to fractional coordinates at the given grid_shape
-    TEMPy em map box_size is ZYX format
-    """
-    zpos, ypos, xpos = np.mgrid[
-        0 : densmap.z_size(), 0 : densmap.y_size(), 0 : densmap.x_size()
-    ]
-    zyx_pos = np.vstack([zpos.ravel(), ypos.ravel(), xpos.ravel()]).T
-    # get coord position
-    # zyx_pos_new = (zyx_pos * densmap.apix) + np.array([z0, y0, x0])
-    frac_coord = zyx_pos[:] / np.array(densmap.box_size())
-    return frac_coord, zyx_pos
 
 
 def calc_best_grid_apix(spacing, cellsize, verbose=0):

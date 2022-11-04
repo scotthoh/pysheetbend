@@ -18,6 +18,8 @@ from math import fabs
 # from TEMPy.maps.em_map import Map
 from numpy import linalg
 
+# from scipy import linalg
+
 # import tracemalloc
 
 # from numpy.linalg.linalg import solve
@@ -453,6 +455,9 @@ def shift_field_coord(
     x1map_r = xdata_r.copy()
     x2map_r = ydata_r.copy()
     x3map_r = zdata_r.copy()
+    print(len(x1map_r[x1map_r == 0]))
+    print(len(x2map_r[x2map_r == 0]))
+    print(len(x3map_r[x3map_r == 0]))
     # end map preparation
     # dmap = dmap.astype('float64')
     # calculate XTY and apply mask
@@ -464,16 +469,16 @@ def shift_field_coord(
 
     ymap = dmap.copy()
     # mmap = mask.copy()
-    ymap_m = ma.masked_array(ymap, mask=mmap).data
-    x1map_m = ma.masked_array(x1map_r, mask=mmap).data
+    # ymap_m = ma.masked_array(ymap, mask=mmap).data
+    # x1map_m = ma.masked_array(x1map_r, mask=mmap).data
     # x1map_r*ymap*mmap
-    x2map_m = ma.masked_array(x2map_r, mask=mmap).data
-    x3map_m = ma.masked_array(x3map_r, mask=mmap).data
+    # x2map_m = ma.masked_array(x2map_r, mask=mmap).data
+    # x3map_m = ma.masked_array(x3map_r, mask=mmap).data
 
-    y1map = x1map_m * ymap_m
+    y1map = x1map_r * ymap
     # x1map_r*ymap*mmap
-    y2map = x2map_m * ymap_m
-    y3map = x3map_m * ymap_m
+    y2map = x2map_r * ymap
+    y3map = x3map_r * ymap
     # y2map = x2map_r*ymap*mmap
     # y3map = x3map_r*ymap*mmap
 
@@ -570,20 +575,32 @@ def shift_field_coord(
     # x33map1.update_header()
     # x33map1.write_to_MRC_file('x33_map_filtered.map')
     # calculate U shifts
+    mmap_f = np.ravel(mmap)
 
+    mat_size = cmap.size - np.count_nonzero(mmap_f)
+    print(cmap.size, np.count_nonzero(mmap), np.count_nonzero(mmap_f), mat_size)
     start = timer()
     # these use a lot of memory. see how to reduce
-    m = np.zeros((cmap.size, 3, 3))
-    v = np.zeros((cmap.size, 3))
-    x11_f = np.ravel(x11map)
-    x12_f = np.ravel(x12map)
-    x13_f = np.ravel(x13map)
-    x22_f = np.ravel(x22map)
-    x23_f = np.ravel(x23map)
-    x33_f = np.ravel(x33map)
-    y1map_f = np.ravel(y1map)
-    y2map_f = np.ravel(y2map)
-    y3map_f = np.ravel(y3map)
+    m = np.zeros((mat_size, 3, 3))
+    v = np.zeros((mat_size, 3))
+    x11_f = np.ravel(x11map)[~mmap_f]
+    x12_f = np.ravel(x12map)[~mmap_f]
+    x13_f = np.ravel(x13map)[~mmap_f]
+    x22_f = np.ravel(x22map)[~mmap_f]
+    x23_f = np.ravel(x23map)[~mmap_f]
+    x33_f = np.ravel(x33map)[~mmap_f]
+    y1map_f = np.ravel(y1map)[~mmap_f]
+    y2map_f = np.ravel(y2map)[~mmap_f]
+    y3map_f = np.ravel(y3map)[~mmap_f]
+    print(len(x11_f[x11_f == 0]))
+    print(len(x12_f[x12_f == 0]))
+    print(len(x13_f[x13_f == 0]))
+    print(len(x22_f[x22_f == 0]))
+    print(len(x23_f[x23_f == 0]))
+    print(len(x33_f[x33_f == 0]))
+    print(len(y1map_f[y1map_f == 0]))
+    print(len(y2map_f[y2map_f == 0]))
+    print(len(y3map_f[y3map_f == 0]))
     # flatten arrays and assign to matrix and vector
     v[:, 0] = y1map_f
     v[:, 1] = y2map_f
@@ -607,7 +624,14 @@ def shift_field_coord(
     end = timer()
     print("Set matrix : {0} s".format(end - start))
     start = timer()
-    v[:] = np.linalg.solve(m[:], v[:])
+    try:
+        # v[:] = np.linalg.solve(m[:], v[:])
+        v[:] = linalg.solve(m[:], v[:])
+    except np.linalg.LinAlgError:
+        for l in range(len(m)):
+            v[l] = np.linalg.lstsq(m[l], v[l], rcond=None)[0]
+        # v[:] = np.linalg.lstsq(m[:], v[:], rcond=None)
+        # v = solve(m, v)
     # v = solve(m, v)
     # v[:], residuals, rank, s = np.linalg.lstsq(m[:], v[:])
 
@@ -615,9 +639,12 @@ def shift_field_coord(
     end = timer()
     print("Solve linalg : {0} s".format(end - start))
     start = timer()
-    x1map_f = v[:, 0]
-    x2map_f = v[:, 1]
-    x3map_f = v[:, 2]
+    x1map_f = np.zeros(cmap.size)
+    x2map_f = np.zeros(cmap.size)
+    x3map_f = np.zeros(cmap.size)
+    x1map_f[~mmap_f] = v[:, 0]
+    x2map_f[~mmap_f] = v[:, 1]
+    x3map_f[~mmap_f] = v[:, 2]
     # reassign values back to fullMaps
     x1map_r = x1map_f.reshape(cmap.shape)
     x2map_r = x2map_f.reshape(cmap.shape)

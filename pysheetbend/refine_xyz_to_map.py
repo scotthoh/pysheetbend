@@ -8,7 +8,6 @@ License: GNU LESSER GENERAL PUBLIC LICENSE v2.1
 
 from __future__ import print_function, absolute_import
 from argparse import ArgumentError
-from struct import Struct  # python 3 proof
 import sys
 import datetime
 from timeit import default_timer as timer
@@ -31,7 +30,7 @@ import pysheetbend.shiftfield_util as sf_util
 import pysheetbend.pseudoregularizer_gemmi as pseudoregularizer
 
 # import pysheetbend.map_scaling as DFM
-from pysheetbend.utils import fileio, map_funcs, cell, dencalc
+from pysheetbend.utils import fileio, map_funcs, cell
 
 # from memory_profiler import profile
 
@@ -59,9 +58,9 @@ from TEMPy.map_process import array_utils
 
 # @profile
 def main(args):
-    """
+    '''
     Run main
-    """
+    '''
     functionType = map_funcs.functionType(2)
 
     # Set variables from parsed arguments
@@ -69,8 +68,8 @@ def main(args):
     ipmap = args.mapin
     if ippdb is None or ipmap is None:
         raise ArgumentError(
-            "Please provide both --pdbin and --mapin to refine model against "
-            "a map.\n Program terminated...\n"
+            'Please provide both --pdbin and --mapin to refine model against '
+            'a map.\n Program terminated...\n'
         )
         # print(
         #    "Please provide --pdbin and --mapin to refine model against a map.\n"
@@ -98,6 +97,8 @@ def main(args):
     hetatom = args.hetatom  # True by default
     hetatm_present = False  # for file writeout in case no hetatm present
     biso_range = args.biso_range
+    remove_ligand = args.no_ligands
+    remove_water = args.no_water
     # ulo = sf_util.b2u(biso_range[0])
     # uhi = sf_util.b2u(biso_range[1])
     # need to make Profile singleton
@@ -117,9 +118,9 @@ def main(args):
         else:
             # need to change this python3 can use , end=''
             raise ArgumentError(
-                "Please specify the resolution of the map "
-                "or resolution by cycle.\n"
-                "Program terminated ...\n"
+                'Please specify the resolution of the map '
+                'or resolution by cycle.\n'
+                'Program terminated ...\n'
             )
     elif res > 0.0:
         if res > resbycyc[-1]:
@@ -133,7 +134,9 @@ def main(args):
     # read map
     mapin, grid_info = fileio.read_map(ipmap)
     # read model
-    structure, hetatm_present = fileio.get_structure(ippdb, verbose)
+    structure, hetatm_present = fileio.get_structure(
+        ippdb, keep_waters=~remove_water, keep_hetatom=~remove_ligand, verbose=verbose
+    )
     # check if map is cubic, make cubic map
     if (
         grid_info.grid_shape[0] != grid_info.grid_shape[1]
@@ -193,62 +196,63 @@ def main(args):
     # create mask map if non is given at input
     # a mask that envelopes the whole particle/volume of interest
     # if nomask create numpy mask array no mask
-    if nomask:
-        mmap = ma.make_mask_none(grid_info.grid_shape)
-        # ipmask = mmap.copy()  # so it will skip the subsequent logic test for ipmask
-    elif ipmask is None:
-        timelog.start("MaskMap")
-        # struc_map = mapin.copy()
-        # struc_map.fullMap = struc_map.fullMap * 0.0
-        # if not np.any(grid_info.origin):
-        struc_map = calculate_density_with_boxsize(
-            structure,
-            reso=res,
-            rate=samp_rate,
-            grid_shape=grid_info.grid_shape,
-        )
-        # else:
-        #    struc_map = calculate_density_with_boxsize(
-        #        structure,
-        #        reso=res,
-        #        rate=samp_rate,
-        #        grid_shape=grid_info.grid_shape,
-        #        origin=grid_info.origin,
-        #    )
-        #    grid_info.origin = np.array([0.0, 0.0, 0.0])
+    # if nomask:
+    #    mmap = ma.make_mask_none(grid_info.grid_shape)
+    #    # ipmask = mmap.copy()  # so it will skip the subsequent logic test for ipmask
+    # elif ipmask is None:
+    #    timelog.start("MaskMap")
+    #    # struc_map = mapin.copy()
+    #    # struc_map.fullMap = struc_map.fullMap * 0.0
+    #    # if not np.any(grid_info.origin):
+    #    struc_map = calculate_density_with_boxsize(
+    #        structure,
+    #        reso=res,
+    #        rate=samp_rate,
+    #        grid_shape=grid_info.grid_shape,
+    #    )
+    # else:
+    #    struc_map = calculate_density_with_boxsize(
+    #        structure,
+    #        reso=res,
+    #        rate=samp_rate,
+    #        grid_shape=grid_info.grid_shape,
+    #        origin=grid_info.origin,
+    #    )
+    #    grid_info.origin = np.array([0.0, 0.0, 0.0])
 
-        # struc_map = structure.calculate_rho(2.5, mapin)
-        mmap = map_funcs.make_mask_from_maps(
-            [fullMap, struc_map],
-            grid_info,
-            res,
-            lpfilt_pre=True,
-        )
-        # tempmap = fullMap + struc_map
-        # this is slow
-        # fdatar = map_funcs.prepare_mask_filter(apix0)
-        # mmap = fftconvolve(tempmap, fdatar, mode="same")
-        # filt_data_r, f000 = map_funcs.make_filter_edge_centered(grid_info, functionType.QUADRATIC)
-        # fft_obj = sf_util.plan_fft(grid_info, input_dtype=np.float32)
-        # ifft_obj = sf_util.plan_ifft(grid_info, input_dtype=np.float32)
+    # struc_map = structure.calculate_rho(2.5, mapin)
+    #    mmap = map_funcs.make_mask_from_maps(
+    #        [fullMap, struc_map],
+    #        grid_info,
+    #        res,
+    #        lpfilt_pre=True,
+    #    )
+    #    mmap = ma.make_mask(np.logical_not(mmap))
+    # tempmap = fullMap + struc_map
+    # this is slow
+    # fdatar = map_funcs.prepare_mask_filter(apix0)
+    # mmap = fftconvolve(tempmap, fdatar, mode="same")
+    # filt_data_r, f000 = map_funcs.make_filter_edge_centered(grid_info, functionType.QUADRATIC)
+    # fft_obj = sf_util.plan_fft(grid_info, input_dtype=np.float32)
+    # ifft_obj = sf_util.plan_ifft(grid_info, input_dtype=np.float32)
 
-        # mmap = map_funcs.fft_convolution_filter(
-        #    tempmap,
-        #    filt_data_r,
-        #    1.0 / f000,
-        #    fft_obj,
-        #    ifft_obj,
-        #    grid_info,
-        # )
+    # mmap = map_funcs.fft_convolution_filter(
+    #    tempmap,
+    #    filt_data_r,
+    #    1.0 / f000,
+    #    fft_obj,
+    #    ifft_obj,
+    #    grid_info,
+    # )
 
-        # mmapt = map_funcs.calculate_map_threshold(mmap)
-        # mmap = ma.masked_less(mmap, mmapt)
-        timelog.end("MaskMap")
-    else:
+    # mmapt = map_funcs.calculate_map_threshold(mmap)
+    # mmap = ma.masked_less(mmap, mmapt)
+    #    timelog.end("MaskMap")
+    if ipmask is not None:
         maskin, maskin_grid_info = fileio.read_map(ipmask)
-        # maskin = mp.readMRC(ipmask)
-        # invert the values for numpy masked_array, true is masked/invalid, false is valid
-        mmap = ma.make_mask(np.logical_not(maskin.grid))
+    #    # maskin = mp.readMRC(ipmask)
+    #    # invert the values for numpy masked_array, true is masked/invalid, false is valid
+    #    mmap = ma.make_mask(np.logical_not(maskin.grid))
 
     # CASE 1:
     # Refine model against EM data
@@ -444,13 +448,33 @@ def main(args):
             )
             if nomask:
                 mmap = ma.make_mask_none(downsamp_shape)
-            else:
-                mmap = map_funcs.make_mask_from_maps(
+            elif ipmask is None:
+                downsamp_mask = map_funcs.make_mask_from_maps(
                     [scl_map, scl_cmap],
                     gridshape,
                     res,
                     lpfilt_pre=True,
+                    radcyc=radcyc,
                 )
+                mmap = ma.make_mask(np.logical_not(downsamp_mask))
+            else:
+                downsamp_mask = map_funcs.resample_data_by_boxsize(
+                    maskin.grid,
+                    downsamp_shape,
+                )
+
+                filt_data_r, f000 = map_funcs.make_filter_edge_centered(
+                    gridshape, filter_radius=radcyc, function=functionType
+                )
+                downsamp_mask = map_funcs.fft_convolution_filter(
+                    downsamp_mask,
+                    filt_data_r,
+                    1.0 / f000,
+                    fft_obj,
+                    ifft_obj,
+                    grid_info,
+                )
+                mmap = ma.make_mask(np.logical_not(downsamp_mask))
             # print(scl_map.dtype)
             # print(scl_cmap.dtype)
             # print(dmap.dtype)
@@ -550,6 +574,10 @@ def main(args):
                 # print(f'mmap dtype : {mmap.fullMap.dtype}')
                 # logger.info(f"dmap dtype : {dmap.fullMap.dtype}")
                 # print(f"dmap dtype : {dmap.fullMap.dtype}")
+                sclcmap_zero = scl_cmap[scl_cmap == 0]
+                dmap_zero = dmap[dmap == 0]
+                print(len(sclcmap_zero))
+                print(len(dmap_zero))
                 x1m, x2m, x3m = shift_field_coord(
                     scl_cmap,  # .fullMap,
                     dmap,  # .fullMap,

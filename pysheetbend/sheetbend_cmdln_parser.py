@@ -63,6 +63,24 @@ class SheetbendParser:
         )
 
         infiles.add_argument(
+            '-no_ligands',
+            '--no_ligands',
+            action="store_true",
+            dest='no_ligands',
+            help='Remove ligands.',
+            required=False,
+        )
+
+        infiles.add_argument(
+            '-no_h2o',
+            '--no_waters',
+            action="store_true",
+            dest='no_water',
+            help='Remove water.',
+            required=False,
+        )
+
+        infiles.add_argument(
             "-maskin",
             "--maskin",
             type=str,
@@ -108,7 +126,7 @@ class SheetbendParser:
             dest="mapout",
             help="Output map filename.",
             metavar="Output_map",
-            default="sheetbend_mapout_result.pdb",
+            default="sheetbend_mapout_result.mrc",
             required=False,
         )
 

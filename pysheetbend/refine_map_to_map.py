@@ -7,25 +7,26 @@ License: ?
 """
 
 from __future__ import print_function  # python 3 proof
+from argparse import ArgumentError
 import sys
 import datetime
 from timeit import default_timer as timer
-import logging
 from scipy.interpolate import RegularGridInterpolator
+
 from scipy.signal import fftconvolve, resample
 
-#
-
-from TEMPy.ScoringFunctions import ScoringFunctions
-from TEMPy.MapParser import MapParser as mp
+import gemmi
 import numpy as np
 import numpy.ma as ma
-import pysheetbend.shiftfield
+from pysheetbend.shiftfield import shift_field_coord
 import pysheetbend.shiftfield_util as sf_util
-import pysheetbend.pseudoregularizer
-import pysheetbend.map_scaling as DFM
-from pysheetbend.sheetbend_cmdln_parser import SheetbendParser
-from memory_profiler import profile
+import pysheetbend.pseudoregularizer_gemmi as pseudoregularizer
+from pysheetbend.utils import fileio, map_funcs, cell
+import pandas as pd
+
+# from pysheetbend.utils.dencalc import calculate_density, calculate_density_with_boxsize
+
+# from memory_profiler import profile
 
 # refine map to map
 
@@ -37,65 +38,44 @@ from TEMPy.map_process import array_utils
 # tracemalloc
 # tracemalloc.start()
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-fh = logging.FileHandler("pysheetbend.log")
-fh.setLevel(logging.INFO)
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-formatter = logging.Formatter("%(message)s")
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-logger.addHandler(fh)
-logger.addHandler(ch)
 
+# @profile
+def main(args):
+    '''
+    Run main refine map to map
+    '''
+    functionType = map_funcs.functionType(2)
 
-@profile
-def main():
-    """
-    Run main
-    """
-    # Setup logger file and console
-    # print(f"Started at {datetime.datetime.now()}")
-    logger.info(f"Started at {datetime.datetime.now()}")
-    # Parse command line input
-    sb_parser = SheetbendParser()  # args=args)
-    sb_parser.get_args()
-    # sb_parser.print_args()
-    logger.info(sb_parser.show_args())
-    # Set variables from parsed arguments
-    # ippdb = sb_parser.args.pdbin
-    ipmap = sb_parser.args.mapin
-    if ipmap is None:
-        logger.error(
-            "Please provide --mapin and --mapin2 to refine map(--mapin2) "
-            "against a reference map(--mapin).\n"
-            "Program terminated...\n"
+    ipmap = args.mapin
+    tgt_map = args.mapin2
+    if ipmap is None or tgt_map is None:
+        raise ArgumentError(
+            'Please provide --mapin and --mapin2 to refine map (--mapin2) '
+            'against a reference map (--mapin).\n'
+            'Program terminated...\n'
         )
-        sys.exit()
 
-    nomask = sb_parser.args.nomask
-    ipmask = sb_parser.args.maskin
-    tgt_map = sb_parser.args.mapin2
-    mapout = sb_parser.args.mapout
-    res = sb_parser.args.res  # -1.0
-    resbycyc = sb_parser.args.res_by_cyc  # None
-    ncyc = sb_parser.args.cycle  # 1
-    refxyz = sb_parser.args.refxyz  # False
-    refuiso = sb_parser.args.refuiso  # False
-    postrefxyz = sb_parser.args.postrefxyz  # False
-    postrefuiso = sb_parser.args.postrefuiso  # False
-    pseudoreg = sb_parser.args.pseudoreg  # no, yes, or postref
-    rad = sb_parser.args.rad  # -1.0
-    radscl = sb_parser.args.radscl  # 4.0
-    xmlout = sb_parser.args.xmlout  # program.xml
-    output_intermediate = sb_parser.args.intermediate  # False
-    verbose = sb_parser.args.verbose  # 0
+    nomask = args.nomask
+    ipmask = args.maskin
+    mapout = args.mapout
+    res = args.res  # -1.0
+    resbycyc = args.res_by_cyc  # None
+    ncyc = args.cycle  # 1
+    refxyz = args.refxyz  # False
+    refuiso = args.refuiso  # False
+    postrefxyz = args.postrefxyz  # False
+    postrefuiso = args.postrefuiso  # False
+    pseudoreg = args.pseudoreg  # no, yes, or postref
+    rad = args.rad  # -1.0
+    radscl = args.radscl  # 4.0
+    xmlout = args.xmlout  # program.xml
+    output_intermediate = args.intermediate  # False
+    verbose = args.verbose  # 0
     ncycrr = 1  # refine-regularise-cycle
     fltr = 2  # quadratic filter
-    hetatom = sb_parser.args.hetatom  # True by default
+    hetatom = args.hetatom  # True by default
     hetatm_present = False  # for file writeout in case no hetatm present
-    biso_range = sb_parser.args.biso_range
+    biso_range = args.biso_range
     # ulo = sf_util.b2u(biso_range[0])
     # uhi = sf_util.b2u(biso_range[1])
     # need to make Profile singleton
@@ -107,16 +87,16 @@ def main():
 
     if not refxyz and not refuiso:
         refxyz = True
-        # print("Setting --coord to True for coordinates refinement.")
-        logger.info("Setting --coord to True for coordinates refinement.")
+        print('Setting --coord to True for coordinates refinement.')
+
     if resbycyc is None:
         if res > 0.0:
             resbycyc = [res]
         else:
             # need to change this python3 can use , end=''
-            logger.error(
-                "Please specify the resolution of the map or resolution by cycle.\n"
-                "Program terminated ...\n"
+            raise ArgumentError(
+                'Please specify the resolution of the map or resolution by cycle.\n'
+                'Program terminated ...\n'
             )
             sys.exit()
     elif res > 0.0:
@@ -124,59 +104,60 @@ def main():
             resbycyc0 = resbycyc
             resbycyc = [resbycyc0[0], res]
     if refuiso or postrefuiso:
-        logger.info(f"B-factor bounds : {biso_range[0]} < B < {biso_range[1]}")
+        print(f"B-factor bounds : {biso_range[0]} < B < {biso_range[1]}")
     if len(resbycyc) == 0:
         resbycyc.append(res)
 
     # initialise results list
     results = []
-    # read model
+    # read maps
+    mapin, grid_info = fileio.read_map(ipmap)
+    mapin_tgt, grid_info_tgt = fileio.read_map(tgt_map)
 
-    # read map
-    mapin = mp.readMRC(ipmap)
-    mapin_tgt = mp.readMRC(tgt_map)
-    apix0 = mapin.apix  # tempy apix should be numpy array
-    ori0 = mapin.origin  # same as above
-    # print(f"mapin dtype : {mapin.fullMap.dtype}")
-    # mapin.write_to_MRC_file('mapin_after_read.map')
-    scorer = ScoringFunctions()
+    # check if map is cubic, make cubic map, add padding with
+    if (
+        grid_info.grid_shape[0] != grid_info.grid_shape[1]
+        or grid_info.grid_shape[1] != grid_info.grid_shape[2]
+    ):
+        mapin, grid_info = map_funcs.make_map_cubic(mapin, grid_info)
+
+    if (
+        grid_info_tgt.grid_shape[0] != grid_info_tgt.grid_shape[1]
+        or grid_info_tgt.grid_shape[1] != grid_info_tgt.grid_shape[2]
+    ):
+        mapin_tgt, grid_info_tgt = map_funcs.make_map_cubic(mapin_tgt, grid_info_tgt)
+
+    apix0 = grid_info.voxel_size
+    ori0 = grid_info.grid_start
+    apix0_tgt = grid_info_tgt.voxel_size
+    ori0_tgt = grid_info_tgt.grid_start
+
     # get cell details
     # try use GEMMI UnitCell
-    cell = sf_util.Cell(
-        mapin.header[10],
-        mapin.header[11],
-        mapin.header[12],
-        mapin.header[13],
-        mapin.header[14],
-        mapin.header[15],
-    )
+    fullMap = mapin.grid
+
     # set gridshape
     # maybe need to do a prime number check on grid dimensions
-    gridshape0 = sf_util.GridDimension(mapin.fullMap.shape)
-    print(gridshape0.grid_sam)
-    print(gridshape0.g_reci)
-    print(gridshape0.g_real)
-    print(gridshape0.g_half)
+    # gridshape = sf_util.GridDimension(mapin.fullMap.shape)
     # res = 2/rec_cell[i]/grid_shape[i] for i in (0,1,2)
     # nyq_res = max(res)
     # nyquist_res = maximum([2.0 * apix0[i] for i in (0, 1, 2)])
+
     nyquist_res = np.amax(2.0 * apix0)
     min_d = np.amax(apix0)
 
     if res > 0.0 and res > nyquist_res:
-        samp_rate = res / (2 * min_d)
+        samp_rate = res / (2 * min_d)  # so that grid size matches original
     else:
         samp_rate = 1.5  # default same value from CLIPPER
 
     # create mask map if non is given at input
     # a mask that envelopes the whole particle/volume of interest
-    if nomask:
-        mmap = ma.make_mask_none(mapin.fullMap.shape)
-        # ipmask = mmap.copy()  # so it will skip the subsequent logic test for ipmask
-    if ipmask:
-        maskin = mp.readMRC(ipmask)
-        # invert the values for numpy masked_array, true is masked/invalid, false is valid
-        mmap = ma.make_mask(np.logical_not(maskin))
+    # if nomask:
+    #    mmap = ma.make_mask_none(mapin.fullMap.shape)
+    #    # ipmask = mmap.copy()  # so it will skip the subsequent logic test for ipmask
+    if ipmask is not None:
+        maskin, maskin_grid_info = fileio.read_map(ipmask)
 
     # CASE 2:
     # Refine map against another map; EM data
@@ -202,34 +183,34 @@ def main():
     # 7. Apply shifts
     # Calculate input map threshold/contour
 
-    logger.info("Refine EM map against EM map")
+    print("Refine EM map against EM map")
     # calculate input map threshold/contour
-    mapin_t = scorer.calculate_map_threshold(mapin)
+    mapin_t = map_funcs.calculate_map_threshold(fullMap)
     # make shift maps
-    map_shifted = mapin_tgt.copy()
-    map_shifted.fullMap = map_shifted.fullMap * 0
-    dumap = map_shifted.copy()
-    dumap.fullMap = dumap.fullMap * 0
-    dvmap = map_shifted.copy()
-    dvmap.fullMap = dvmap.fullMap * 0
-    dwmap = map_shifted.copy()
-    dwmap.fullMap = dvmap.fullMap * 0
-    nz0 = np.linspace(0, 1, num=mapin_tgt.z_size(), endpoint=False)
-    ny0 = np.linspace(0, 1, num=mapin_tgt.y_size(), endpoint=False)
-    nx0 = np.linspace(0, 1, num=mapin_tgt.x_size(), endpoint=False)
-    mapintgt_interp = RegularGridInterpolator((nz0, ny0, nx0), mapin_tgt.fullMap)
-    coord_frac, im = sf_util.grid_coord_to_frac(map_shifted)
-    zi, yi, xi = zip(*im)
+    map_shifted = np.zeros(grid_info_tgt.grid_shape, dtype=np.float32)
+    dumap = np.zeros(grid_info_tgt.grid_shape, dtype=np.float32)
+    dvmap = np.zeros(grid_info_tgt.grid_shape, dtype=np.float32)
+    dwmap = np.zeros(grid_info_tgt.grid_shape, dtype=np.float32)
+    nz0 = np.linspace(0, 1, num=grid_info_tgt.grid_shape[2], endpoint=False)
+    ny0 = np.linspace(0, 1, num=grid_info_tgt.grid_shape[1], endpoint=False)
+    nx0 = np.linspace(0, 1, num=grid_info_tgt.grid_shape[0], endpoint=False)
+    mapintgt_interp = RegularGridInterpolator(
+        (nx0, ny0, nz0),
+        np.array(mapin_tgt.grid, copy=False),
+        bounds_error=False,
+        fill_value=0.0,
+    )
+    print(nx0[0], ny0[0], nz0[0], nx0[-1], ny0[-1], nz0[-1])
+    coord_frac, im = map_funcs.grid_coord_to_frac(map_shifted, grid_info_tgt)
+    xi, yi, zi = zip(*im)
 
     # target map is mapin_tgt, reference map is mapin
-    tgtmapin_t = scorer.calculate_map_threshold(mapin_tgt)
-    ovl_map1, ovl_map2 = scorer.calculate_overlap_scores(
-        mapin, mapin_tgt, mapin_t, tgtmapin_t
+    tgtmapin_t = map_funcs.calculate_map_threshold(mapin_tgt.grid)
+    ovl_map1, ovl_map2 = map_funcs.calculate_overlap_scores(
+        mapin.grid, mapin_tgt.grid, mapin_t, tgtmapin_t
     )
-    logger.info(
-        "Calculated map thresholds are {mapin_t} (ref) and {tgtmapin_t} (target)."
-    )
-    logger.info("Initial target to reference map overlap scores {ovl_map2}.")
+    print(f'Calculated map thresholds are {mapin_t} (ref) and {tgtmapin_t} (target).')
+    print(f'Initial target to reference map overlap scores {ovl_map2}.')
 
     # setup RegularGridInterpolator
 
@@ -255,8 +236,10 @@ def main():
         # set radius if not user specified
         radcyc = rad
         if radcyc <= 0.0:
+            if rcyc <= 8.0 and radscl > 5.0:
+                radscl = 5.0
             radcyc = radscl * rcyc
-        logger.info(
+        print(
             "\nCycle: {0}   Resolution: {1}   Radius: {2}\n".format(
                 cyc + 1, rcyc, radcyc
             )
@@ -269,28 +252,40 @@ def main():
         # better gridshapes.
         # don't have to use lowpass as it doesn't affect results much
         spacing = rcyc / (2 * samp_rate)
-        logger.info(f"Calculated spacing : {spacing}")
+        print(f"Calculated spacing : {spacing}")
         downsamp_shape, spacing = sf_util.calc_best_grid_apix(
-            spacing, (cell.a, cell.b, cell.c)
+            spacing,
+            (fullMap.unit_cell.a, fullMap.unit_cell.b, fullMap.unit_cell.c),
         )
         # resampled_map = #
-        downsamp_map = mapin.resample_by_box_size(downsamp_shape)
+        timelog.start('Resample')
+        downsamp_map = map_funcs.resample_data_by_boxsize(fullMap, downsamp_shape)
         # downsamp_map.update_header()
-        downsamp_shape = downsamp_map.fullMap.shape
-        downsamp_apix = downsamp_map.apix
-        mmap = ma.make_mask_none(downsamp_shape)
-        zg = np.linspace(0, 1, num=downsamp_map.z_size(), endpoint=False)
-        yg = np.linspace(0, 1, num=downsamp_map.y_size(), endpoint=False)
-        xg = np.linspace(0, 1, num=downsamp_map.x_size(), endpoint=False)
-        gridshape = sf_util.GridDimension(downsamp_shape)
+        timelog.end('Resample')
+        downsamp_shape = downsamp_map.shape
+        downsamp_apix = map_funcs.calculate_pixel_size(
+            fullMap.unit_cell,
+            downsamp_shape,
+        )
+        gridshape = cell.GridInfo(
+            downsamp_shape,
+            grid_info.grid_start,
+            downsamp_shape,
+            downsamp_apix,
+            grid_info.origin,
+        )
+
+        # zg = np.linspace(0, 1, num=downsamp_shape[2], endpoint=False)
+        # yg = np.linspace(0, 1, num=downsamp_shape[1], endpoint=False)
+        # xg = np.linspace(0, 1, num=downsamp_shape[0], endpoint=False)
         timelog.start("fftplan")
-        fft_obj = sf_util.plan_fft(gridshape)
+        fft_obj = sf_util.plan_fft(gridshape, input_dtype=np.float32)
         timelog.end("fftplan")
         timelog.start("ifftplan")
-        ifft_obj = sf_util.plan_ifft(gridshape)
+        ifft_obj = sf_util.plan_ifft(gridshape, input_dtype=np.complex64)
         timelog.end("ifftplan")
-        logger.info(f"Downsample shape : {downsamp_shape}")
-        logger.info(f"Downsample apix : {downsamp_apix}")
+        print(f"Downsample shape : {downsamp_shape}")
+        print(f"Downsample apix : {downsamp_apix}")
         if verbose >= 1:
             start = timer()
         timelog.start("MapDensity")
@@ -302,23 +297,26 @@ def main():
         # find a way to make the grids extends to 1?
         coord_frac1 = (
             coord_frac
-            - np.array([dwmap[zi, yi, xi], dvmap[zi, yi, xi], dumap[zi, yi, xi]]).T
+            - np.array([dumap[xi, yi, zi], dvmap[xi, yi, zi], dwmap[xi, yi, zi]]).T
         )
-        coord_frac1 = shiftfield.cor_mod1(coord_frac1, [1.0, 1.0, 1.0])
-        if cyc > 0:
-            for i in coord_frac1:
-                print(i)
-
+        coord_frac1 = map_funcs.cor_mod_array(coord_frac1, [1.0, 1.0, 1.0])
+        # if cyc > 0:
+        #    pd.DataFrame(coord_frac1).to_csv(
+        #        f'test_coord_frac1_{cyc}.csv', header=None, index=None
+        #    )
+        # for i in range(len(coord_frac1)):
+        #    if (coord_frac1[i] > nx0[-1]).any() or (coord_frac1[i] < nx0[0]).any():
+        #        print(i, coord_frac1[i])
         shifts_arr = mapintgt_interp(coord_frac1)
-        map_shifted.fullMap[zi, yi, xi] = shifts_arr
-        cmap = map_shifted.resample_by_box_size(downsamp_shape)
+        map_shifted[xi, yi, zi] = shifts_arr
+        cmap = map_funcs.resample_data_by_boxsize(map_shifted, downsamp_shape)
         # cmap = downsamp_map.copy()
         # cmap.fullMap = cmap.fullMap * 0
         # cmap = structure.calculate_rho(2.5, downsamp_map)
         timelog.end("MapDensity")
         # if verbose >= 1:
         #    end = timer()
-        #    logger.info("Density calc {0}".format(end - start))
+        #    print("Density calc {0}".format(end - start))
         # calculate difference map
         # truncate resolution - low pass filter; lpfiltb = True
         # lowpass filtering map doesn't result in much difference
@@ -330,29 +328,64 @@ def main():
         if verbose >= 1:
             start = timer()
         timelog.start("DiffMap")
-        scl_map, scl_cmap, dmap = DFM.get_diffmap12(
+        scl_map, scl_cmap, dmap = map_funcs.calc_diffmap(
             downsamp_map,
             cmap,
             rcyc,
             rcyc,
-            cyc=cyc + 1,
-            lpfiltb=False,
+            gridshape,
+            gridshape,
+            lpfilt_pre=True,
+            lpfilt_post=False,
+            refscl=False,
+            randsize=0.1,
             flag_dust=False,
-            refsc=False,
             verbose=verbose,
+            fft_obj=fft_obj,
+            ifft_obj=ifft_obj,
         )
         timelog.end("DiffMap")
+        # mmap = ma.make_mask_none(downsamp_shape)
+        if nomask:
+            mmap = ma.make_mask_none(downsamp_shape)
+        elif ipmask is None:
+            downsamp_mask = map_funcs.make_mask_from_maps(
+                [scl_map, scl_cmap],
+                gridshape,
+                res,
+                lpfilt_pre=True,
+                radcyc=radcyc,
+            )
+            mmap = ma.make_mask(np.logical_not(downsamp_mask))
+        else:
+            downsamp_mask = map_funcs.resample_data_by_boxsize(
+                maskin.grid,
+                downsamp_shape,
+            )
+            filt_data_r, f000 = map_funcs.make_filter_edge_centered(
+                gridshape, filter_radius=radcyc, function=functionType
+            )
+            downsamp_mask = map_funcs.fft_convolution_filter(
+                downsamp_mask,
+                filt_data_r,
+                1.0 / f000,
+                fft_obj,
+                ifft_obj,
+                grid_info,
+            )
+            mmap = ma.make_mask(np.logical_not(downsamp_mask))
+
         if verbose >= 1:
             end = timer()
-            logger.info("Diff map calc: {0} s ".format(end - start))
+            print("Diff map calc: {0} s ".format(end - start))
         # if verbose >= 0:
-        #    logger.info("check apix")
-        #    logger.info(mapin.__class__.__name__)
-        #    logger.info(mapin.apix)
-        #    logger.info(scl_map.__class__.__name__)
-        #    logger.info(scl_map.apix)
-        #    logger.info(scl_cmap.__class__.__name__)
-        #    logger.info(scl_cmap.apix)
+        #    print("check apix")
+        #    print(mapin.__class__.__name__)
+        #    print(mapin.apix)
+        #    print(scl_map.__class__.__name__)
+        #    print(scl_map.apix)
+        #    print(scl_cmap.__class__.__name__)
+        #    print(scl_cmap.apix)
         # if verbose >= 3:
         #    testoutmap = dmap.copy()
         #    DFM.write_mapfile(testoutmap, f"test_diffmap{cyc+1}.map")
@@ -363,26 +396,29 @@ def main():
             start = timer()
         timelog.start("Scoring")
         # calculate map contour
-        dmapin_t = scorer.calculate_map_threshold(downsamp_map)
-        mapcurreso_t = scorer.calculate_map_threshold(scl_map)
+        # dmapin_t = map_funcs.calculate_map_threshold(downsamp_map)
+        mapcurreso_t = map_funcs.calculate_map_threshold(scl_map)
         # print("Calculated input map volume threshold is ", end="")
-        m = "Calculated input map volume threshold is "
-        m += "{0:.2f} and {1:.2f} (current resolution).\n".format(
-            dmapin_t, mapcurreso_t
-        )
+        # m = "Calculated input map volume threshold is "
+        # m += "{0:.2f} and {1:.2f} (current resolution).\n".format(
+        # ]    dmapin_t, mapcurreso_t
+        # )
         # calculate model contour
         # t = 2.5 if rcyc > 10.0 else 2.0 if rcyc > 6.0 else 1.5
-        cmap_t = 1.5 * cmap.std()
+        # cmap_t = 1.5 * cmap.std()
         # fltrcmap_t = t*scl_cmap.std() #np.std(scl_cmap.fullMap)
-        fltrcmap_t = scorer.calculate_map_threshold(scl_cmap)
+        fltrcmap_t = map_funcs.calculate_map_threshold(scl_cmap)
         # print("Calculated model threshold is ", end="")
-        m += "Calculated model threshold is "
-        m += "{0:.2f} and {1:.2f} (current resolution)\n".format(cmap_t, fltrcmap_t)
-        logger.info(m)
-        ovl_map1, ovl_mdl1 = scorer.calculate_overlap_scores(
-            downsamp_map, cmap, dmapin_t, cmap_t
+        m = "Calculated model threshold is "
+        m += "{0:.2f} and {1:.2f} (current resolution)\n".format(
+            mapcurreso_t,
+            fltrcmap_t,
         )
-        ovl_map2, ovl_mdl2 = scorer.calculate_overlap_scores(
+        print(m)
+        # ovl_map1, ovl_mdl1 = map_funcs.calculate_overlap_scores(
+        #    downsamp_map, cmap, dmapin_t, cmap_t
+        # )
+        ovl_map, ovl_mdl = map_funcs.calculate_overlap_scores(
             scl_map, scl_cmap, mapcurreso_t, fltrcmap_t
         )
         timelog.end("Scoring")
@@ -392,20 +428,20 @@ def main():
         # print("Fraction of map overlapping with model: ", end="")
         m = "TEMPy scores :\n"
         m += " Fraction of map overlapping with model: "
-        m += "{0:.3f} and {1:.3f} (current resolution)\n".format(ovl_map1, ovl_map2)
+        m += "{0:.3f} \n".format(ovl_map)
         # print("Fraction of model overlapping with map: ", end="")
         m += " Fraction of model overlapping with map: "
-        m += "{0:.3f} and {1:.3f} (current resolution)\n".format(ovl_mdl1, ovl_mdl2)
-        logger.info(m)
+        m += "{0:.3f} \n".format(ovl_mdl)
+        print(m)
         if refxyz:
             print("REFINE XYZ")
             timelog.start("Shiftfield")
             # print(f'maps dtype, lpcmap : {scl_cmap.fullMap.dtype}')
             # print(f'mmap dtype : {mmap.fullMap.dtype}')
-            print(f"dmap dtype : {dmap.fullMap.dtype}")
-            x1m, x2m, x3m = shiftfield.shift_field_coord(
-                scl_cmap.fullMap,
-                dmap.fullMap,
+            print(f"dmap dtype : {dmap.dtype}")
+            x1m, x2m, x3m = shift_field_coord(
+                scl_cmap,  # .fullMap,
+                dmap,  # .fullMap,
                 mmap,
                 radcyc,
                 fltr,
@@ -422,25 +458,18 @@ def main():
             # size of x,y,z for x1map=x2map=x3map
             # print(x1map.fullMap.box_size())
             timelog.start("Interpolate")
-            print(gridshape0.grid_sam)
-            print(gridshape0.g_reci)
-            print(gridshape0.g_real)
-            print(gridshape0.g_half)
             x1m_resample = x1m.copy()
             x2m_resample = x2m.copy()
             x3m_resample = x3m.copy()
-            x1m_resample = resample(x1m_resample, gridshape0.grid_sam[0], axis=0)
-            x1m_resample = resample(x1m_resample, gridshape0.grid_sam[1], axis=1)
-            x1m_resample = resample(x1m_resample, gridshape0.grid_sam[2], axis=2)
-            x2m_resample = resample(x2m_resample, gridshape0.grid_sam[0], axis=0)
-            x2m_resample = resample(x2m_resample, gridshape0.grid_sam[1], axis=1)
-            x2m_resample = resample(x2m_resample, gridshape0.grid_sam[2], axis=2)
-            x3m_resample = resample(x3m_resample, gridshape0.grid_sam[0], axis=0)
-            x3m_resample = resample(x3m_resample, gridshape0.grid_sam[1], axis=1)
-            x3m_resample = resample(x3m_resample, gridshape0.grid_sam[2], axis=2)
-            print(x1m_resample.shape)
-            print(x1m_resample.shape)
-            print(x1m_resample.shape)
+            x1m_resample = resample(x1m_resample, grid_info.grid_shape[0], axis=0)
+            x1m_resample = resample(x1m_resample, grid_info.grid_shape[1], axis=1)
+            x1m_resample = resample(x1m_resample, grid_info.grid_shape[2], axis=2)
+            x2m_resample = resample(x2m_resample, grid_info.grid_shape[0], axis=0)
+            x2m_resample = resample(x2m_resample, grid_info.grid_shape[1], axis=1)
+            x2m_resample = resample(x2m_resample, grid_info.grid_shape[2], axis=2)
+            x3m_resample = resample(x3m_resample, grid_info.grid_shape[0], axis=0)
+            x3m_resample = resample(x3m_resample, grid_info.grid_shape[1], axis=1)
+            x3m_resample = resample(x3m_resample, grid_info.grid_shape[2], axis=2)
             # interp_x1 = RegularGridInterpolator((zg, yg, xg), x1m)
             # interp_x2 = RegularGridInterpolator((zg, yg, xg), x2m)
             # interp_x3 = RegularGridInterpolator((zg, yg, xg), x3m)
@@ -449,9 +478,9 @@ def main():
             # v = np.flip(v, 1)
             # scaling for shifts use 1 (em) instead of 2 (xtal)
             ## something wrong here in interpolation out of bounds??
-            dumap.fullMap += x1m_resample  # 1.0 * interp_x1(coord_frac)
-            dvmap.fullMap += x2m_resample  # 1.0 * interp_x2(coord_frac)
-            dwmap.fullMap += x3m_resample  # 1.0 * interp_x3(coord_frac)
+            dumap += x1m_resample  # 1.0 * interp_x1(coord_frac)
+            dvmap += x2m_resample  # 1.0 * interp_x2(coord_frac)
+            dwmap += x3m_resample  # 1.0 * interp_x3(coord_frac)
             # dx = (1.0 * interp_x1(v)) * cell.a
             # dy = (1.0 * interp_x2(v)) * cell.b
             # dz = (1.0 * interp_x3(v)) * cell.c
@@ -463,8 +492,6 @@ def main():
             radcyc,
             ovl_map1,
             ovl_map2,
-            ovl_mdl1,
-            ovl_mdl2,
             0.0,
         )
         results.append(temp_result)
@@ -478,29 +505,63 @@ def main():
         # end of cycle loop
 
     # calculate final map
-    coord_frac -= np.array([dwmap[zi, yi, xi], dvmap[zi, yi, xi], dumap[zi, yi, xi]]).T
+    coord_frac -= np.array([dumap[xi, yi, zi], dvmap[xi, yi, zi], dwmap[xi, yi, zi]]).T
     shifts_arr = mapintgt_interp(coord_frac)
-    map_shifted.fullMap[zi, yi, xi] = shifts_arr
+    map_shifted[xi, yi, zi] = shifts_arr[:]
+    # du, dv, dw maps
+    dumap = dumap * fullMap.unit_cell.parameters[0]
+    dvmap = dvmap * fullMap.unit_cell.parameters[1]
+    dwmap = dwmap * fullMap.unit_cell.parameters[2]
+    print(dumap.dtype)
+    print(type(dumap))
+    fileio.write_map_as_MRC(
+        dumap,
+        fullMap.unit_cell,
+        outpath='dumap_shiftfield.mrc',
+    )
+    fileio.write_map_as_MRC(
+        dvmap,
+        fullMap.unit_cell,
+        outpath='dvmap_shiftfield.mrc',
+    )
+    fileio.write_map_as_MRC(
+        dwmap,
+        fullMap.unit_cell,
+        outpath='dwmap_shiftfield.mrc',
+    )
+
     # write final map
-    map_shifted.write_to_MRC_file(mapout)
-    print(map_shifted)
+    fileio.write_map_as_MRC(
+        map_shifted,
+        fullMap.unit_cell,
+        outpath=mapout,
+    )
+
+    # map_shifted.write_to_MRC_file(mapout)
+    # print(map_shifted)
     # write xml results
     if xmlout is not None:
         f = open(xmlout, "w")
         for i in range(0, len(results)):
             if i == 0:
-                results[i].write_xml_results_start(f, mapout, mapin)
+                results[i].write_xml_results_start(f, mapout, tgt_map)
             results[i].write_xml_results_cyc(f)
             if i == len(results) - 1:
                 results[i].write_xml_results_end(f)
         f.close()
 
-    logger.info(f"Ended at {datetime.datetime.now()}")
-    timelog.profile_log()
+    print(f"Ended at {datetime.datetime.now()}")
+    if verbose >= 2:
+        timelog.profile_log()
 
 
 if __name__ == "__main__":
     # parser = SheetbendParser()
     # parser.get_args()
     # main(parser.args)
-    main()
+    import sys
+    from sheetbend_cmdln_parser import SheetbendParser
+
+    sb_parser = SheetbendParser()
+    sb_parser.get_args(sys.argv[1:])
+    main(sb_parser.args)

@@ -11,7 +11,6 @@ from scipy.ndimage import measurements
 from pysheetbend.shiftfield import effective_radius, fltr
 import pysheetbend.shiftfield_util as sf_util
 from math import fabs
-from pysheetbend.utils import dencalc
 from pysheetbend.utils.cell import GridInfo
 
 
@@ -48,6 +47,32 @@ def map_grid_position_array(grid_info, structure, index=False):
         xyz_coordinates.append([xyz[0], xyz[1], xyz[2]])
     # print(xyz_coordinates)
     return xyz_coordinates
+
+
+def grid_coord_to_frac(densmap=None, grid_info=None, tempy_flag=False):
+    '''
+    convert grid coordinates to fractional coordinates at the given grid_shape
+    TEMPy em map box_size is ZYX format
+    GEMMI map grid is XYZ format
+    '''
+    if tempy_flag:
+        zpos, ypos, xpos = np.mgrid[
+            0 : densmap.z_size(), 0 : densmap.y_size(), 0 : densmap.x_size()
+        ]
+        ind_pos = np.vstack([zpos.ravel(), ypos.ravel(), xpos.ravel()]).T
+        # get coord position
+        # zyx_pos_new = (zyx_pos * densmap.apix) + np.array([z0, y0, x0])
+        frac_coord = ind_pos[:] / np.array(densmap.box_size())
+    else:
+        xpos, ypos, zpos = np.mgrid[
+            0 : grid_info.grid_shape[0],
+            0 : grid_info.grid_shape[1],
+            0 : grid_info.grid_shape[2],
+        ]
+        ind_pos = np.vstack([xpos.ravel(), ypos.ravel(), zpos.ravel()]).T
+        frac_coord = ind_pos[:] / grid_info.grid_shape
+
+    return frac_coord, ind_pos
 
 
 def fltr(r, radius, function: functionType = functionType(2)):
@@ -283,12 +308,33 @@ def calculate_map_contour(map_data, sigma_factor: float = 1.5):
     return contour
 
 
+def cor_mod_array(a, b):
+    '''
+    Returns corrected remainder of division. If remainder <0,
+    then adds value b to remainder.
+    Arguments
+        a: array of Dividend (x,y,z indices)
+        b: array of Divisor (x,y,z indices)
+    '''
+    c = np.fmod(a, b)
+    d = np.transpose(np.nonzero(c < 0))
+    # d, e = np.nonzero(c<0)
+    for i in d:  # range(len(d)):
+        c[i[0], i[1]] += b[i[1]]
+        # c[i, j] += b[i]
+    return c
+
+
 def calculate_overlap_scores(
     map_data,
     map_data2,
     map_threshold,
     map_threshold2,
 ):
+    if isinstance(map_data, gemmi.FloatGrid):
+        map_data = np.array(map_data, copy=False, dtype=np.float32)
+    if isinstance(map_data2, gemmi.FloatGrid):
+        map_data2 = np.array(map_data2, copy=False, dtype=np.float32)
     binmap1 = map_data > float(map_threshold)
     binmap2 = map_data2 > float(map_threshold2)
     mask_array = (binmap1 * binmap2) > 0
@@ -337,6 +383,7 @@ def make_mask_from_maps(
     lpfilt_pre=False,
     lpfilt_post=False,
     ref_scale=False,
+    radcyc=15.0,
 ):
     # amplitude match
     fft_obj = sf_util.plan_fft(grid_info, input_dtype=np.float32)
@@ -356,7 +403,9 @@ def make_mask_from_maps(
     )
 
     combined_map = scaled_maps[0] + scaled_maps[1]
-    filt_data_r, f000 = make_filter_edge_centered(grid_info, function=func)
+    filt_data_r, f000 = make_filter_edge_centered(
+        grid_info, filter_radius=radcyc, function=func
+    )
     mmap = fft_convolution_filter(
         combined_map,
         filt_data_r,
@@ -456,7 +505,7 @@ def amplitude_match(
     if reso is not None:
         cutoff1 = grid1_info.voxel_size[0] / float(reso)
         cutoff2 = grid2_info.voxel_size[0] / float(reso)
-        if lpfilt_post and not lpfilt_pre:
+        if lpfilt_pre and not lpfilt_post:
             ftfltr1 = tanh_lowpass(
                 grid1_info.grid_shape, cutoff1, fall=0.2, keep_shape=False
             )
@@ -525,8 +574,14 @@ def amplitude_match(
             # continue
         else:
             nc = 0
-        ft1_m = np.mean(np.square(abs1))
-        ft2_m = np.mean(np.square(abs2))
+        if len(abs1) != 0:
+            ft1_m = np.nanmean(np.square(abs1))
+        else:
+            ft1_m = 1e-6
+        if len(abs2) != 0:
+            ft2_m = np.nanmean(np.square(abs2))
+        else:
+            ft2_m = 1e-6
         if ft1_m == 0.0 and ft2_m == 0.0:
             x = highlvl
             highlvl = x + step
