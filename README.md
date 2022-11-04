@@ -1,9 +1,6 @@
 # PYSHEETBEND
-[![DOI](https://zenodo.org/badge/465796368.svg)](https://zenodo.org/badge/latestdoi/465796368)
 ## A python implementation of SHEETBEND.
 ### Sheetbend - model morphing by shift field refinement
-
-### *Still Under Development*
 
 ### Description:
 *Sheetbend* performs model morphing by shift field refinement. This is a very fast form of preliminary refinement which can be applied
