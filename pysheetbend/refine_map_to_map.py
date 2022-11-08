@@ -545,9 +545,10 @@ def main(args):
         for i in range(0, len(results)):
             if i == 0:
                 results[i].write_xml_results_start(f, mapout, tgt_map)
-            results[i].write_xml_results_cyc(f)
+            results[i].write_xml_results_cyc(f, map=True)
             if i == len(results) - 1:
-                results[i].write_xml_results_end(f)
+                results[i].write_xml_results_end_macrocyc(f, map=True)
+                results[i].write_xml_results_end(f, map=True)
         f.close()
 
     print(f"Ended at {datetime.datetime.now()}")

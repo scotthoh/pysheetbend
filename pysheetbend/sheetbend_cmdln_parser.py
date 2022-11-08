@@ -116,7 +116,7 @@ class SheetbendParser:
             dest="pdbout",
             help="Output model filename.",
             metavar="Output_PBD",
-            default="sheetbend_pdbout_result.pdb",
+            default="shiftfield.pdb",
             required=False,
         )
 
@@ -204,6 +204,18 @@ class SheetbendParser:
                 "probably reasonable, (Default=1)"
             ),
             metavar="Cycles",
+            default=1,
+            required=False,
+        )
+
+        ref.add_argument(
+            "--macro-cycles",
+            type=int,
+            dest="cycle_regularise",
+            help=(
+                "Number of refine-regularise (macro) cycles to perform. (Default = 1)"
+            ),
+            metavar="CyclesRR",
             default=1,
             required=False,
         )

@@ -37,3 +37,24 @@ def calculate_density_with_boxsize(
     resample_grid = resample_data_by_boxsize(dencalc.grid, grid_shape)
 
     return resample_grid
+
+
+if __name__ == '__main__':
+    import sys
+    from pysheetbend.utils import fileio
+    import numpy as np
+
+    mapin = sys.argv[1]
+    pdbin = sys.argv[2]
+    reso = float(sys.argv[3])
+
+    m, gridinfo = fileio.read_map(mapin)
+    s, hetatm_present = fileio.get_structure(pdbin)
+    min_d = np.amax(gridinfo.voxel_size)
+    samp_rate = reso / (2 * min_d)
+    print(samp_rate)
+    print(min_d)
+    calc_map = calculate_density_with_boxsize(
+        s, reso, rate=samp_rate, grid_shape=gridinfo.grid_shape
+    )
+    fileio.write_map_as_MRC(calc_map, m.grid.unit_cell, outpath='calc_map.mrc')

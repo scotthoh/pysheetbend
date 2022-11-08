@@ -860,17 +860,26 @@ class ResultsByCycle:
     fscavg: float
     """
 
-    def write_xml_results_start(self, f, oppdb, ippdb):
+    def write_xml_results_header(self, f, oppdb, ippdb):
         """
         Write the starting lines for XML output
         Arguments:
         *f*
             file object
         """
-        f.write("<SheetbendResult>\n")
-        f.write(" <Title>{0}</Title>\n".format(os.path.basename(ippdb)))
-        f.write(" <RefinedPDB>{0}</RefinedPDB>\n".format(oppdb))
-        f.write(" <Cycles>\n")
+        f.write('<SheetbendResult>\n')
+        f.write(' <Title>{0}</Title>\n'.format(os.path.basename(ippdb)))
+        f.write(' <RefinedPDB>{0}</RefinedPDB>\n'.format(oppdb))
+        f.write(' <RefineRegulariseCycles cycle="{0}">\n'.format(self.cyclerr + 1))
+
+    def write_xml_results_start(self, f):
+        """
+        Write the refine regularise cycle start lines for XML output
+        Arguments:
+        *f*
+            file object
+        """
+        f.write(' <RefineRegulariseCycles cycle="{0}">\n'.format(self.cyclerr + 1))
 
     def write_xml_results_start_map(self, f, mapout, mapin):
         """
@@ -884,27 +893,40 @@ class ResultsByCycle:
         f.write(" <FinalMap>{0}</FinalMap>\n".format(mapout))
         f.write(" <Cycles>\n")
 
-    def write_xml_results_end(self, f):
+    def write_xml_results_end_macrocyc(self, f, map=False):
+        '''
+        Write the ending lines of each macro cycle for XML output
+        Arguments:
+        *f*
+            file object
+        '''
+        if map:
+            f.write(" </Cycles>\n")
+        else:
+            f.write(" </RefineRegulariseCycles>\n")
+
+    def write_xml_results_final(self, f, map=False):
         """
-        Write the ending lines for XML output
+        Write the final lines for XML output
         Arguments:
         *f*
             file object
         """
-        f.write(" </Cycles>\n")
         f.write(" <Final>\n")
-        f.write(
-            "   <RegularizeNumber>{0}</RegularizeNumber>\n".format(self.cyclerr + 1)
-        )
-        f.write("   <Number>{0}</Number>\n".format(self.cycle + 1))
-        f.write("   <Resolution>{0}</Resolution>\n".format(self.resolution))
-        f.write("   <Radius>{0}</Radius>\n".format(self.radius))
-        f.write("   <OverlapMap>{0}</OverlapMap>\n".format(self.mapmdlfrac))
-        f.write("   <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
+        if not map:
+            f.write(
+                "  <RegularizeNumber>{0}</RegularizeNumber>\n".format(self.cyclerr + 1)
+            )
+        f.write("  <Number>{0}</Number>\n".format(self.cycle + 1))
+        f.write("  <Resolution>{0}</Resolution>\n".format(self.resolution))
+        f.write("  <Radius>{0}</Radius>\n".format(self.radius))
+        f.write("  <OverlapMap>{0}</OverlapMap>\n".format(self.mapmdlfrac))
+        if not map:
+            f.write("  <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
         f.write(" </Final>\n")
         f.write("</SheetbendResult>\n")
 
-    def write_xml_results_cyc(self, f):
+    def write_xml_results_cyc(self, f, map=False):
         """
         Write the results of the cycle for XML output
         Arguments:
@@ -912,14 +934,12 @@ class ResultsByCycle:
             file object
         """
         f.write("  <Cycle>\n")
-        f.write(
-            "   <RegularizeNumber>{0}</RegularizeNumber>\n".format(self.cyclerr + 1)
-        )
         f.write("   <Number>{0}</Number>\n".format(self.cycle + 1))
         f.write("   <Resolution>{0}</Resolution>\n".format(self.resolution))
         f.write("   <Radius>{0}</Radius>\n".format(self.radius))
         f.write("   <OverlapMap>{0}</OverlapMap>\n".format(self.mapmdlfrac))
-        f.write("   <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
+        if not map:
+            f.write("   <OverlapModel>{0}</OverlapModel>\n".format(self.mdlmapfrac))
         f.write("  </Cycle>\n")
 
 

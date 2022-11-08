@@ -10,6 +10,7 @@ from __future__ import print_function, absolute_import
 from argparse import ArgumentError
 import sys
 import datetime
+from os.path import splitext
 from timeit import default_timer as timer
 from scipy.interpolate import RegularGridInterpolator
 from scipy.signal import fftconvolve
@@ -92,7 +93,7 @@ def main(args):
     xmlout = args.xmlout  # program.xml
     output_intermediate = args.intermediate  # False
     verbose = args.verbose  # 0
-    ncycrr = 1  # refine-regularise-cycle
+    ncycrr = args.cycle_regularise  # refine-regularise-cycle
     fltr = 2  # quadratic filter
     hetatom = args.hetatom  # True by default
     hetatm_present = False  # for file writeout in case no hetatm present
@@ -271,6 +272,7 @@ def main(args):
             print("\nRefine-regularise cycle: {0}\n".format(cycrr + 1))
         else:
             print("\nRefine cycle: {0}\n".format(cycrr + 1))
+        result = []
         for cyc in range(0, ncyc):
             shift_vars = []
             shift_u = []
@@ -678,9 +680,15 @@ def main(args):
                 ovl_mdl,
                 0.0,
             )
-            results.append(temp_result)
+            result.append(temp_result)
             if output_intermediate:
-                outname = "{0}_{1}.pdb".format(oppdb.strip(".pdb"), cyc + 1)
+                pathfname = splitext(oppdb)[0]
+                if ncycrr > 1:
+                    outname = "{0}_intermediate_mcyc{1}_ref{2}.pdb".format(
+                        pathfname, cycrr + 1, cyc + 1
+                    )
+                else:
+                    outname = "{0}_intermediate_{1}.pdb".format(pathfname, cyc + 1)
                 # structure.write_to_PDB(outname, hetatom=hetatm_present)
                 structure.write_minimal_pdb(f'{outname}')
             if len(shift_vars) != 0 and verbose >= 2:
@@ -727,26 +735,41 @@ def main(args):
             # logger.info(
             #    "Fraction of model overlapping with map: {0:.3f}".format(ovl_mdlf)
             # )
+        results.append(result)
         # end of psedo reg loop
-    # write final pdb
-    if oppdb is not None:
-        outfname = "{0}_sheetbendfinal.pdb".format(oppdb.strip(".pdb"))
-        # structure.write_to_PDB(f"{outfname}", hetatom=hetatm_present)  # preg.got_hetatm
-        structure.write_minimal_pdb(f'{outfname}')
-    else:
-        outfname = "{0}_sheetbendfinal.pdb".format(ippdb.strip(".pdb"))
-        # structure.write_to_PDB(f"{outfname}", hetatom=hetatm_present)
+        # write final pdb for each pseudo reg loop
+        outfname = ''
+        if oppdb is not None:
+            pathfname = splitext(oppdb)[0]
+            if ncycrr > 1:
+                outfname = "{0}_refined_mcyc{1}.pdb".format(pathfname, cycrr + 1)
+            else:
+                outfname = "{0}_refined.pdb".format(pathfname)
+            # structure.write_to_PDB(f"{outfname}", hetatom=hetatm_present)  # preg.got_hetatm
+            # structure.write_minimal_pdb(f'{outfname}')
+        else:
+            pathfname = splitext(ippdb)[0]
+            if ncycrr > 1:
+                outfname = "{0}_refined_mcyc{1}.pdb".format(pathfname, cycrr + 1)
+            else:
+                outfname = "{0}_refined.pdb".format(pathfname)
+            # structure.write_to_PDB(f"{outfname}", hetatom=hetatm_present)
         structure.write_minimal_pdb(f'{outfname}')
 
     # write xml results
     if xmlout is not None:
         f = open(xmlout, "w")
-        for i in range(0, len(results)):
-            if i == 0:
-                results[i].write_xml_results_start(f, outfname, ippdb)
-            results[i].write_xml_results_cyc(f)
-            if i == len(results) - 1:
-                results[i].write_xml_results_end(f)
+        for m in range(0, ncycrr):
+            for i in range(0, ncyc):
+                if m == 0 and i == 0:
+                    results[m][i].write_xml_results_header(f, outfname, ippdb)
+                if m > 0 and i == 0:
+                    results[m][i].write_xml_results_start(f)
+                results[m][i].write_xml_results_cyc(f)
+                if i == ncyc - 1:
+                    results[m][i].write_xml_results_end_macrocyc(f)
+            if m == ncycrr - 1:
+                results[m][i].write_xml_results_final(f)
         f.close()
 
     # logger.info(f"Ended at {datetime.datetime.now()}")
