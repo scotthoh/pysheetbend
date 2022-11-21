@@ -2,32 +2,12 @@
 # for coordinates and U-Iso values
 # S.W.Hoh, University of York, 2020
 
-# from TEMPy.protein.structure_blurrer import StructureBlurrer
-
-# from TEMPy.maps.em_map import Map
-# from TEMPy.math.vector import Vector
-from logging import raiseExceptions
 import numpy as np
 from timeit import default_timer as timer
 from numba import njit
 from math import fabs
 
-# from TEMPy.EMMap import Map
-# from TEMPy.Vector import Vector
-
-# from TEMPy.maps.em_map import Map
-from numpy import linalg
-
-# from scipy import linalg
-
-# import tracemalloc
-
-# from numpy.linalg.linalg import solve
-import numpy.ma as ma
-
 # from memory_profiler import profile
-
-# using numba here
 
 
 @njit()
@@ -283,25 +263,25 @@ def gradient_map_calc(xdata_c, g_reci, g_real, ch):
     zdata_c = np.zeros(xdata_c.shape, dtype=np.complex64)
 
     i = complex(0.0, 1.0)
-    for cz in range(g_reci[2]):  # z
+    for cx in range(g_reci[0]):  # x
         for cy in range(g_reci[1]):  # y
-            for cx in range(g_reci[0]):  # x
-                hkl = hkl_c((cz, cy, cx), ch, g_real)  # returned index z,y,x
+            for cz in range(g_reci[2]):  # z
+                hkl = hkl_c((cx, cy, cz), ch, g_real)  # returned index x,y,z
                 cdata = i * xdata_c[cx, cy, cz]
-                zdata_c[cx, cy, cz] = float((2 * np.pi) * hkl[0]) * cdata
+                xdata_c[cx, cy, cz] = float((2 * np.pi) * hkl[0]) * cdata
                 ydata_c[cx, cy, cz] = float((2 * np.pi) * hkl[1]) * cdata
-                xdata_c[cx, cy, cz] = float((2 * np.pi) * hkl[2]) * cdata
-    return zdata_c, ydata_c, xdata_c
+                zdata_c[cx, cy, cz] = float((2 * np.pi) * hkl[2]) * cdata
+    return xdata_c, ydata_c, zdata_c
 
 
 @njit()
 def gradient_map_iso_calc(data_c, g_reci, g_real, ch, cell):
-    for cz in range(0, g_reci[2]):  # z
+    for cx in range(0, g_reci[0]):  # x
         for cy in range(0, g_reci[1]):  # y
-            for cx in range(0, g_reci[0]):  # x
-                hkl = hkl_c((cz, cy, cx), ch, g_real)
+            for cz in range(0, g_reci[2]):  # z
+                hkl = hkl_c((cx, cy, cz), ch, g_real)
                 scl = (2 * np.pi * np.pi) * metric_reci_lengthsq(
-                    hkl[2], hkl[1], hkl[0], cell
+                    hkl[0], hkl[1], hkl[2], cell
                 )
                 data_c[cx, cy, cz] = scl * data_c[cx, cy, cz]
     return data_c
@@ -310,7 +290,7 @@ def gradient_map_iso_calc(data_c, g_reci, g_real, ch, cell):
 @njit()
 def hkl_c(c, ch, g):
     """
-    Returns the index (z,y,x)
+    Returns the index (x,y,z)
     Arguments
     *c*
       Index h,k,l
@@ -319,7 +299,7 @@ def hkl_c(c, ch, g):
     *g*
       Real space grid shape
     """
-    # z, y, x convention
+    # x,y,z convention
     cv = np.array((int(c[0]), int(c[1]), int(c[2])))
     chv = np.array((int(ch[0]), int(ch[1]), int(ch[2])))
     v1 = cv + chv
@@ -410,7 +390,7 @@ def shift_field_coord(
     # print(cmap.dtype)
     # print(xdata_c.dtype)
     # calculate gradient map coefficients
-    zdata_c, ydata_c, xdata_c = gradient_map_calc(xdata_c, g_reci, g_real, ch)
+    xdata_c, ydata_c, zdata_c = gradient_map_calc(xdata_c, g_reci, g_real, ch)
 
     # calculate gradient maps
     # fft complex to real
@@ -430,6 +410,9 @@ def shift_field_coord(
     zdata_r = np.zeros(data_r.shape, dtype=np.float32)
     ydata_r = np.zeros(data_r.shape, dtype=np.float32)
     xdata_r = np.zeros(data_r.shape, dtype=np.float32)
+    zdata_r[:] = 1e-6
+    ydata_r[:] = 1e-6
+    xdata_r[:] = 1e-6
     print("zdata_r {0}".format(zdata_r.shape))
     # print("ifftw")
     # print("output shape")
@@ -467,7 +450,7 @@ def shift_field_coord(
     # if verbose >= 3:
     #    writeMap(dmap, origin, apix, cmap.shape, f"ymap_{cyc}.map")
 
-    ymap = dmap.copy()
+    # ymap = dmap.copy()
     # mmap = mask.copy()
     # ymap_m = ma.masked_array(ymap, mask=mmap).data
     # x1map_m = ma.masked_array(x1map_r, mask=mmap).data
@@ -475,10 +458,10 @@ def shift_field_coord(
     # x2map_m = ma.masked_array(x2map_r, mask=mmap).data
     # x3map_m = ma.masked_array(x3map_r, mask=mmap).data
 
-    y1map = x1map_r * ymap
+    y1map = x1map_r * dmap
     # x1map_r*ymap*mmap
-    y2map = x2map_r * ymap
-    y3map = x3map_r * ymap
+    y2map = x2map_r * dmap
+    y3map = x3map_r * dmap
     # y2map = x2map_r*ymap*mmap
     # y3map = x3map_r*ymap*mmap
 
@@ -581,8 +564,8 @@ def shift_field_coord(
     print(cmap.size, np.count_nonzero(mmap), np.count_nonzero(mmap_f), mat_size)
     start = timer()
     # these use a lot of memory. see how to reduce
-    m = np.zeros((mat_size, 3, 3))
-    v = np.zeros((mat_size, 3))
+    m = np.zeros((mat_size, 3, 3), dtype=np.float32)
+    v = np.zeros((mat_size, 3), dtype=np.float32)
     x11_f = np.ravel(x11map)[~mmap_f]
     x12_f = np.ravel(x12map)[~mmap_f]
     x13_f = np.ravel(x13map)[~mmap_f]
@@ -625,8 +608,9 @@ def shift_field_coord(
     print("Set matrix : {0} s".format(end - start))
     start = timer()
     try:
-        # v[:] = np.linalg.solve(m[:], v[:])
-        v[:] = linalg.solve(m[:], v[:])
+        v[:] = np.linalg.solve(m[:], v[:])
+        # v[:] = linalg.solve(m[:], v[:])
+        # v = linalg.solve(m, v)
     except np.linalg.LinAlgError:
         for l in range(len(m)):
             v[l] = np.linalg.lstsq(m[l], v[l], rcond=None)[0]
@@ -639,9 +623,9 @@ def shift_field_coord(
     end = timer()
     print("Solve linalg : {0} s".format(end - start))
     start = timer()
-    x1map_f = np.zeros(cmap.size)
-    x2map_f = np.zeros(cmap.size)
-    x3map_f = np.zeros(cmap.size)
+    x1map_f = np.zeros(cmap.size, dtype=np.float32)
+    x2map_f = np.zeros(cmap.size, dtype=np.float32)
+    x3map_f = np.zeros(cmap.size, dtype=np.float32)
     x1map_f[~mmap_f] = v[:, 0]
     x2map_f[~mmap_f] = v[:, 1]
     x3map_f[~mmap_f] = v[:, 2]
@@ -706,7 +690,7 @@ def shift_field_coord(
     return x1map_r, x2map_r, x3map_r
 
 
-@njit
+@njit()
 def metric_reci_lengthsq(x, y, z, celldim):
     """
     (x*(x*a'*a' + y*2.0*a'*b'*np.cos(gam') + z*2.0*a'*c'*np.cos(bet'))
@@ -745,8 +729,8 @@ def shift_field_uiso(
     *ifft_obj*
       Planned ifft object
     """
-    g_reci = (cmap.shape[2], cmap.shape[1], cmap.shape[0] // 2 + 1)
-    g_real = (cmap.shape[2], cmap.shape[1], cmap.shape[0])
+    g_reci = (cmap.shape[0], cmap.shape[1], cmap.shape[2] // 2 + 1)
+    g_real = (cmap.shape[0], cmap.shape[1], cmap.shape[2])
     ch = (g_real[0] // 2, g_real[1] // 2, g_real[2] // 2)
     # fullMap is numpy array
     data_r = cmap
@@ -769,37 +753,43 @@ def shift_field_uiso(
     # calculate gradient maps
     data_c = data_c.conjugate().copy()
     data_r = ifft_obj(data_c)
-    x1map = data_r.copy()
+    # x1map = data_r.copy()
 
     # make xmap
     # ymap = np.zeros(dmap.fullMap.shape)
     # mmap = np.zeros(mask.fullMap.shape)
     # ymap = dmap.fullMap.copy()
 
-    ymap_m = ma.masked_array(dmap, mask=mmap).data
-    x1map_m = ma.masked_array(x1map, mask=mmap).data
+    # ymap_m = ma.masked_array(dmap, mask=mmap).data
+    # x1map_m = ma.masked_array(x1map, mask=mmap).data
     # calculate XTY apply mask
-    y1map = x1map_m * ymap_m
+    # y1map = x1map_m * ymap_m
+    y1map = data_r * dmap
     # y1map = x1map.fullMap*ymap_m
     # calculate XTX
-    x11map = x1map * x1map
+    x11map = data_r * data_r
 
     # filter maps
     # dmap.set_apix_tempy()
     fltr_data_r, scale = prepare_filter(
         rad, fltr, g_reci, g_real, ch, origin, apix, dmap.shape
     )
-    y1map = mapfilter(y1map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
-    x11map = mapfilter(x11map, fltr_data_r, scale, fft_obj, ifft_obj, g_real, g_reci)
+
+    y1map = mapfilter(
+        y1map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
+    x11map = mapfilter(
+        x11map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+    )
     # mf = RadialFilter(rad, fltr, g_reci, g_real, ch,
     #                  dmap.origin, dmap.apix, dmap.fullMap.shape)
     # y1map = mf.mapfilter(y1map, fft_obj, ifft_obj)
     # x11map = mf.mapfilter(x11map, fft_obj, ifft_obj)
 
     # calculate U shifts
-    x1map = y1map / x11map
-
-    return x1map
+    data_r[~mmap] = y1map[~mmap] / x11map[~mmap]
+    data_r[mmap] = 0.0
+    return data_r
 
 
 @njit

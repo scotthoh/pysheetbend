@@ -12,6 +12,7 @@ from pysheetbend.shiftfield import effective_radius, fltr
 import pysheetbend.shiftfield_util as sf_util
 from math import fabs
 from pysheetbend.utils.cell import GridInfo
+from gemmi import Position as GPosition, FloatGrid, SpaceGroup
 
 
 class functionType(Enum):
@@ -47,6 +48,99 @@ def map_grid_position_array(grid_info, structure, index=False):
         xyz_coordinates.append([xyz[0], xyz[1], xyz[2]])
     # print(xyz_coordinates)
     return xyz_coordinates
+
+
+def numpy_to_gemmi_grid(numpy_array, unitcell, spacegroup='P1'):
+    grid = FloatGrid(numpy_array)
+    if isinstance(unitcell, list) or isinstance(unitcell, np.ndarray):
+        grid.unit_cell.set(
+            unitcell[0], unitcell[1], unitcell[2], unitcell[3], unitcell[4], unitcell[5]
+        )
+    else:
+        grid.unit_cell.set(
+            unitcell.a,
+            unitcell.b,
+            unitcell.c,
+            unitcell.alpha,
+            unitcell.beta,
+            unitcell.gamma,
+        )
+    grid.spacegroup = SpaceGroup(spacegroup)
+
+    return grid
+
+
+def update_atoms_position(
+    grid_dx,
+    grid_dy,
+    grid_dz,
+    structure,
+    mode='linear',
+    scale=1.0,
+):
+    '''
+    Interpolate values of atom positions on the grids and update positions.
+    '''
+    modes = ['linear', 'tricubic']
+    if mode not in modes:
+        raise ValueError(f'Invalid mode. Expected one of {modes}')
+    if mode == 'linear':
+        for cra in structure[0].all():
+            dx = scale * grid_dx.interpolate_value(cra.atom.pos) * grid_dx.unit_cell.a
+            dy = scale * grid_dy.interpolate_value(cra.atom.pos) * grid_dy.unit_cell.b
+            dz = scale * grid_dz.interpolate_value(cra.atom.pos) * grid_dz.unit_cell.c
+            cra.atom.pos += GPosition(dx, dy, dz)
+
+    if mode == 'tricubic':
+        for cra in structure[0].all():
+            dx = (
+                scale
+                * grid_dx.tricubic_interpolation(cra.atom.pos)
+                * grid_dx.unit_cell.a
+            )
+            dy = (
+                scale
+                * grid_dy.tricubic_interpolation(cra.atom.pos)
+                * grid_dy.unit_cell.b
+            )
+            dz = (
+                scale
+                * grid_dz.tricubic_interpolation(cra.atom.pos)
+                * grid_dz.unit_cell.c
+            )
+            cra.atom.pos += GPosition(dx, dy, dz)
+
+
+def update_uiso_values(
+    grid_du, structure, biso_range, mode='linear', scale=1.0, verbose=0
+):
+    modes = ['linear', 'tricubic']
+    if mode not in modes:
+        raise ValueError(f'Invalid mode. Expected one of {modes}')
+    if verbose >= 2:
+        shift_u = []
+    if mode == 'linear':
+        for cra in structure[0].all():
+            du = scale * grid_du.interpolate_value(cra.atom.pos)
+            db = sf_util.u2b(du)
+            cra.atom.b_iso = sf_util.limit_biso(
+                (cra.atom.b_iso - db), biso_range[0], biso_range[1]
+            )
+    if mode == 'tricubic':
+        for cra in structure[0].all():
+            du = scale * grid_du.tricubic_interpolation(cra.atom.pos)
+            db = sf_util.u2b(du)
+            cra.atom.b_iso = sf_util.limit_biso(
+                (cra.atom.b_iso - db), biso_range[0], biso_range[1]
+            )
+            if verbose >= 2:
+                shift_u.append(db)
+    if len(shift_u) != 0 and verbose >= 2:
+        outusiocsv = 'shiftuiso_u2b.csv'
+        fuiso = open(outusiocsv, "w")
+        for j in range(0, len(shift_u)):
+            fuiso.write("{0}, {1}\n".format(j, shift_u[j]))
+        fuiso.close()
 
 
 def grid_coord_to_frac(densmap=None, grid_info=None, tempy_flag=False):
@@ -594,9 +688,9 @@ def amplitude_match(
 
         # scale to amplitudes of reference map, map1 if reference
         if ref_scale:
-            if ft1_m == 0.0:
+            if ft2_m == 0.0:
                 continue
-            ft1[fshells1] = shellvec1 * np.sqrt(ft2_m / ft1_m)
+            ft2[fshells2] = shellvec2 * np.sqrt(ft1_m / ft2_m)
         else:
             # replace with avg amplitudes for the two maps
             ft1[fshells1] = shellvec1 * np.sqrt((ft2_m + ft1_m) / (2.0 * ft1_m))
@@ -825,6 +919,49 @@ def calc_diffmap(
             diff2[:] = diff2 * (diff2 > 0.0)
 
         return scaledmap1, scaledmap2, diff1
+
+
+def global_scale_maps(
+    ref_map,
+    target_map,
+    ref_grid_info,
+    target_grid_info,
+    ref_map_reso,
+    target_map_reso,
+    lpfilt_pre=False,
+    lpfilt_post=False,
+    ref_scale=False,
+    fft_obj=None,
+    ifft_obj=None,
+):
+    if fft_obj is None:
+        fft_obj = sf_util.plan_fft(ref_grid_info, input_dtype=np.float32)
+        ifft_obj = sf_util.plan_ifft(target_grid_info, input_dtype=np.complex64)
+
+    scale_ref, scale_tgt, = amplitude_match(
+        ref_map,
+        target_map,
+        ref_grid_info,
+        target_grid_info,
+        reso=max(ref_map_reso, target_map_reso),
+        lpfilt_pre=lpfilt_pre,
+        lpfilt_post=lpfilt_post,
+        ref_scale=ref_scale,
+        fft_obj=fft_obj,
+        ifft_obj=ifft_obj,
+    )
+    # min of minimas of two scaled maps
+    min1 = scale_ref.min()
+    min2 = scale_tgt.min()
+    min_scaled_maps = min(min1, min2)
+    # shift to positive values
+    if min_scaled_maps < 0.0:
+        # make values non zero
+        min_scaled_maps = min_scaled_maps + 0.05 * min_scaled_maps
+        scale_ref[:] = scale_ref + float(-min_scaled_maps)
+        scale_tgt[:] = scale_tgt + float(-min_scaled_maps)
+
+    return scale_ref, scale_tgt
 
 
 def make_map_cubic(mapin, grid_info):

@@ -281,13 +281,6 @@ class SheetbendParser:
             ),
             required=False,
         )
-        ref.add_argument(
-            "--postrefine-coord",
-            action="store_true",
-            dest="postrefxyz",
-            help="Perform post-refinement on coordinates. (Default = False)",
-            required=False,
-        )
 
         ref.add_argument(
             "--postrefine-u-iso",

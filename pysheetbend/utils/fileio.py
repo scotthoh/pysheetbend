@@ -43,7 +43,7 @@ def get_structure(
         print("Exiting...\n")
         sys.exit()
     print(f"Reading {ipmodel}.")
-    structure = gemmi.read_structure(ipmodel)
+    structure = gemmi.read_structure(ipmodel, merge_chain_parts=False)
     structure.setup_entities()
     structure.assign_label_seq_id()
 

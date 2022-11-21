@@ -63,9 +63,7 @@ def main(args):
     ncyc = args.cycle  # 1
     refxyz = args.refxyz  # False
     refuiso = args.refuiso  # False
-    postrefxyz = args.postrefxyz  # False
     postrefuiso = args.postrefuiso  # False
-    pseudoreg = args.pseudoreg  # no, yes, or postref
     rad = args.rad  # -1.0
     radscl = args.radscl  # 4.0
     xmlout = args.xmlout  # program.xml
@@ -76,6 +74,7 @@ def main(args):
     hetatom = args.hetatom  # True by default
     hetatm_present = False  # for file writeout in case no hetatm present
     biso_range = args.biso_range
+    interpolate_mode = 'linear'
     # ulo = sf_util.b2u(biso_range[0])
     # uhi = sf_util.b2u(biso_range[1])
     # need to make Profile singleton
@@ -299,7 +298,7 @@ def main(args):
             coord_frac
             - np.array([dumap[xi, yi, zi], dvmap[xi, yi, zi], dwmap[xi, yi, zi]]).T
         )
-        coord_frac1 = map_funcs.cor_mod_array(coord_frac1, [1.0, 1.0, 1.0])
+        # coord_frac1 = map_funcs.cor_mod_array(coord_frac1, [1.0, 1.0, 1.0])
         # if cyc > 0:
         #    pd.DataFrame(coord_frac1).to_csv(
         #        f'test_coord_frac1_{cyc}.csv', header=None, index=None
@@ -307,8 +306,26 @@ def main(args):
         # for i in range(len(coord_frac1)):
         #    if (coord_frac1[i] > nx0[-1]).any() or (coord_frac1[i] < nx0[0]).any():
         #        print(i, coord_frac1[i])
-        shifts_arr = mapintgt_interp(coord_frac1)
-        map_shifted[xi, yi, zi] = shifts_arr
+        # use gemmi grid interpolate
+        # shifts_arr = np.empty(len(coord_frac1), dtype=np.float32)
+        if interpolate_mode == 'linear':
+            for i in range(0, len(coord_frac1)):
+                grid_value = mapin_tgt.grid.interpolate_value(
+                    gemmi.Fractional(
+                        coord_frac1[i][0], coord_frac1[i][1], coord_frac1[i][2]
+                    )
+                )
+                map_shifted[im[i, 0], im[i, 1], im[i, 2]] = grid_value
+        elif interpolate_mode == 'tricubic':
+            for i in range(0, len(coord_frac1)):
+                grid_value = mapin_tgt.grid.tricubic_interpolation(
+                    gemmi.Fractional(
+                        coord_frac1[i][0], coord_frac1[i][1], coord_frac1[i][2]
+                    )
+                )
+                map_shifted[im[i, 0], im[i, 1], im[i, 2]] = grid_value
+        # shifts_arr = mapintgt_interp(coord_frac1)
+        # map_shifted[xi, yi, zi] = shifts_arr
         cmap = map_funcs.resample_data_by_boxsize(map_shifted, downsamp_shape)
         # cmap = downsamp_map.copy()
         # cmap.fullMap = cmap.fullMap * 0
@@ -505,9 +522,29 @@ def main(args):
         # end of cycle loop
 
     # calculate final map
-    coord_frac -= np.array([dumap[xi, yi, zi], dvmap[xi, yi, zi], dwmap[xi, yi, zi]]).T
-    shifts_arr = mapintgt_interp(coord_frac)
-    map_shifted[xi, yi, zi] = shifts_arr[:]
+    coord_frac1 = (
+        coord_frac
+        - np.array([dumap[xi, yi, zi], dvmap[xi, yi, zi], dwmap[xi, yi, zi]]).T
+    )
+    if interpolate_mode == 'linear':
+        for i in range(0, len(coord_frac1)):
+            grid_value = mapin_tgt.grid.interpolate_value(
+                gemmi.Fractional(
+                    coord_frac1[i][0], coord_frac1[i][1], coord_frac1[i][2]
+                )
+            )
+            map_shifted[im[i, 0], im[i, 1], im[i, 2]] = grid_value
+    elif interpolate_mode == 'tricubic':
+        for i in range(0, len(coord_frac1)):
+            grid_value = mapin_tgt.grid.tricubic_interpolation(
+                gemmi.Fractional(
+                    coord_frac1[i][0], coord_frac1[i][1], coord_frac1[i][2]
+                )
+            )
+            map_shifted[im[i, 0], im[i, 1], im[i, 2]] = grid_value
+
+    # shifts_arr = mapintgt_interp(coord_frac)
+    # map_shifted[xi, yi, zi] = shifts_arr[:]
     # du, dv, dw maps
     dumap = dumap * fullMap.unit_cell.parameters[0]
     dvmap = dvmap * fullMap.unit_cell.parameters[1]
@@ -544,11 +581,12 @@ def main(args):
         f = open(xmlout, "w")
         for i in range(0, len(results)):
             if i == 0:
-                results[i].write_xml_results_start(f, mapout, tgt_map)
+                results[i].write_xml_results_start_map(f, mapout, tgt_map)
             results[i].write_xml_results_cyc(f, map=True)
             if i == len(results) - 1:
                 results[i].write_xml_results_end_macrocyc(f, map=True)
-                results[i].write_xml_results_end(f, map=True)
+            if i == len(results) - 1:
+                results[i].write_xml_results_final(f, map=True)
         f.close()
 
     print(f"Ended at {datetime.datetime.now()}")
