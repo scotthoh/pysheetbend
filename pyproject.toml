@@ -7,5 +7,6 @@ dependencies = [
     "emda",
     "gemmi >= 0.5.7",
     "ccpem-utils",
+    "pyfftw",
 ]
 build-backend = "setuptools.build_meta"

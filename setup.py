@@ -36,6 +36,7 @@ setuptools.setup(
         "numba>=0.53.1",
         "scipy",
         "ccpem-utils",
+        "pyfftw",
     ],
     entry_points={
         "console_scripts": ["pysheetbend = pysheetbend.sheetbend:main"],
