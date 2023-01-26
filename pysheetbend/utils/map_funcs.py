@@ -1,11 +1,8 @@
 from __future__ import absolute_import, print_function
 from logging import raiseExceptions
 import gemmi
-from matplotlib.streamplot import Grid
 import numpy as np
-from enum import Enum
 from numpy.fft import fftn, fftshift, ifftn, ifftshift
-from regex import F
 from scipy.signal import resample
 from scipy.ndimage import measurements
 from typing import Union
