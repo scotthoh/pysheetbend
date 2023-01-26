@@ -135,15 +135,16 @@ def update_uiso_values(
             )
             if verbose >= 2:
                 shift_u.append(db)
-    if len(shift_u) != 0 and verbose >= 2:
-        outusiocsv = f"shiftuiso_u2b_{cycle}"
-        if ucyc >= 0:
-            outusiocsv += f"_{ucyc}"
-        outusiocsv += ".csv"
-        fuiso = open(outusiocsv, "w")
-        for j in range(0, len(shift_u)):
-            fuiso.write("{0}, {1}\n".format(j, shift_u[j]))
-        fuiso.close()
+    if verbose >= 2:
+        if len(shift_u) != 0:
+            outusiocsv = f"shiftuiso_u2b_{cycle}"
+            if ucyc >= 0:
+                outusiocsv += f"_{ucyc}"
+            outusiocsv += ".csv"
+            fuiso = open(outusiocsv, "w")
+            for j in range(0, len(shift_u)):
+                fuiso.write("{0}, {1}\n".format(j, shift_u[j]))
+            fuiso.close()
 
 
 def grid_coord_to_frac(densmap=None, grid_info=None, tempy_flag=False):
