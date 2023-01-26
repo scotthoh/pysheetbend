@@ -8,14 +8,14 @@ from timeit import default_timer as timer
 from collections import OrderedDict
 import numpy as np
 
-'''
+"""
 from TEMPy.Vector import Vector as Vector
 from TEMPy.EMMap import Map
 from TEMPy.StructureParser import mmCIFParser as cifp
 from TEMPy.StructureParser import PDBParser as pdbp
 from TEMPy.ProtRep_Biopy import BioPy_Structure as BPS
 from TEMPy.MapParser import MapParser as mp
-'''
+"""
 """
 # from time import perf_counter
 from TEMPy.math.vector import Vector
@@ -46,7 +46,7 @@ def match_model_map_unitcell(model, map):
     model_cell = np.array(model.cell.parameters)
     map_cell = np.array(map.unit_cell.parameters)
     if not bool(np.asarray(model_cell == map_cell).all()):
-        print('Match model map unit cell')
+        print("Match model map unit cell")
         model.cell.set(
             map.unit_cell.a,
             map.unit_cell.b,
@@ -140,7 +140,7 @@ def largest_prime_factor(n):
 
 
 def calc_best_grid_apix(spacing, cellsize, verbose=0):
-    '''
+    """
     Return best nearest grid and pixel size to input
     Arguments:
         spacing: numpy 1D array of pixel size X,Y,Z dimension
@@ -148,7 +148,7 @@ def calc_best_grid_apix(spacing, cellsize, verbose=0):
         verbose: verbosity, default=0
     Return:
         grid_shape, pixel_size: 1D arrays of (X,Y,Z)
-    '''
+    """
     if not isinstance(spacing, np.ndarray):
         spacing = np.array((spacing, spacing, spacing), dtype=np.float32)
 
@@ -183,98 +183,65 @@ def calc_best_grid_apix(spacing, cellsize, verbose=0):
     # for i in range(0, 3):
     #    if newapix[i] < apix[i]:
     if verbose > 1:
-        print(f'new apix, {newapix}')
-        print(f'New grid shape, {out_grid}')
+        print(f"new apix, {newapix}")
+        print(f"New grid shape, {out_grid}")
     return out_grid, newapix
 
 
-def plan_fft(grid_dim: 'GridInfo', input_dtype=np.float32):
+def plan_fft_ifft(
+    gridinfo: "GridInfo", fft_in_dtype=np.float32, fft_out_dtype=np.complex64
+):
     """
-    Returns fft object. Plan fft
+    Returns fft and ifft objects. Plan fft and ifft.
     Arguments
-    *grid_dim*
-      grid shape of map
+        grid_dim: GridInfo object containing grid shape data etc.
+        fft_input_dtype: input type for fft, output type for ifft, default=np.float32
+        fft_output_dtype: input type for ifft, output type of fft, default=np.complex64
+    Returns
+        fft, ifft objects
     """
-    output_shape = grid_dim.grid_reci
-    output_dtype = np.complex64
-    # if input_dtype == np.float32:
-    #    output_dtype = np.complex64
-    if input_dtype == np.float64:
-        output_dtype = np.complex128
-    # need to add scipy fft if pyfftw not imported
+    fft_out_dtype = np.complex64
+    if fft_in_dtype == np.float64:
+        fft_out_dtype = np.complex128
     try:
         if not pyfftw_flag:
             raise ImportError
-
-        input_arr = pyfftw.empty_aligned(
-            grid_dim.grid_shape,
-            dtype=input_dtype,
-            n=16,
+        # plan fft
+        fft_arrin = pyfftw.empty_aligned(
+            shape=gridinfo.grid_shape,
+            dtype=fft_in_dtype,
         )
-        # dtype=np.float64,
-        # n=16,
-        output_arr = pyfftw.empty_aligned(
-            output_shape,
-            dtype=output_dtype,
-            n=16,
+        fft_arrout = pyfftw.empty_aligned(
+            shape=gridinfo.grid_reci,
+            dtype=fft_out_dtype,
         )
-        # dtype=np.complex128,
-        # n=16,
-        # fft planning
         fft = pyfftw.FFTW(
-            input_arr,
-            output_arr,
+            input_array=fft_arrin,
+            output_array=fft_arrout,
             direction="FFTW_FORWARD",
             axes=(0, 1, 2),
             flags=["FFTW_ESTIMATE"],
         )
-    except ImportError:
-        print("Not running")
 
-    return fft
-
-
-def plan_ifft(grid_dim: 'GridInfo', input_dtype=np.complex64):
-    """
-    Returns ifft object. Plan ifft
-    Arguments
-    *grid_dim*
-      grid shape of map
-    """
-    output_shape = grid_dim.grid_shape
-    output_dtype = np.float32
-    # if input_dtype == np.complex64:
-    #    output_dtype = np.float32
-    if input_dtype == np.complex128:
-        output_dtype = np.float64
-    # need to add scipy fft if pyfftw not imported
-    try:
-        if not pyfftw_flag:
-            raise ImportError
-        input_arr = pyfftw.empty_aligned(
-            grid_dim.grid_reci,
-            dtype=input_dtype,
-            n=16,
+        # plan ifft
+        ifft_arrin = pyfftw.empty_aligned(
+            shape=gridinfo.grid_reci,
+            dtype=fft_out_dtype,
         )
-        # dtype=np.float32, n=16)
-        output_arr = pyfftw.empty_aligned(
-            output_shape,
-            # dtype='float32', n=16)
-            dtype=output_dtype,
-            n=16,
+        ifft_arrout = pyfftw.empty_aligned(
+            shape=gridinfo.grid_shape,
+            dtype=fft_in_dtype,
         )
-        # ifft planning,
         ifft = pyfftw.FFTW(
-            input_arr,
-            output_arr,
+            input_array=ifft_arrin,
+            output_array=ifft_arrout,
             direction="FFTW_BACKWARD",
             axes=(0, 1, 2),
             flags=["FFTW_ESTIMATE"],
         )
     except ImportError:
-        print("Not running")
-
-    return ifft
+        print("pyfftw import error. Not running")
+    return fft, ifft
 
 
 def cor_mod(a, b):
@@ -839,6 +806,13 @@ class ResultsByCycle:
     ):
         """
         Initialise results for the cycle
+         cyclerr = nth macro cycle (regularize refine cycle)
+         cycle = nth cycle of the refine cycle
+         resolution = resolution of the current cycle
+         radius = regression radius of the current cycle
+         mapmdlfrac = TEMPy score for of map overlaping with model
+         mdlmapfrac = TEMPy score for model overlaping with map
+         fscavg = FSC average of model to map
         """
         self.cyclerr = cyclerr
         self.cycle = cycle
@@ -864,20 +838,20 @@ class ResultsByCycle:
         """
         Write the starting lines for XML output
         Arguments:
-        *f*
-            file object
+            f = file object
+            oppdb = output PDB filename
+            ippdb = input PDB filename
         """
-        f.write('<SheetbendResult>\n')
-        f.write(' <Title>{0}</Title>\n'.format(os.path.basename(ippdb)))
-        f.write(' <RefinedPDB>{0}</RefinedPDB>\n'.format(oppdb))
+        f.write("<SheetbendResult>\n")
+        f.write(" <Title>{0}</Title>\n".format(os.path.basename(ippdb)))
+        f.write(" <RefinedPDB>{0}</RefinedPDB>\n".format(oppdb))
         f.write(' <RefineRegulariseCycles cycle="{0}">\n'.format(self.cyclerr + 1))
 
     def write_xml_results_start(self, f):
         """
         Write the refine regularise cycle start lines for XML output
         Arguments:
-        *f*
-            file object
+            f = file object
         """
         f.write(' <RefineRegulariseCycles cycle="{0}">\n'.format(self.cyclerr + 1))
 
@@ -885,8 +859,9 @@ class ResultsByCycle:
         """
         Write the starting lines for XML output for map refinement
         Arguments:
-        *f*
-            file object
+            f = file object
+            mapout = output map filename
+            mapin = input map filename
         """
         f.write("<SheetbendResult>\n")
         f.write(" <Title>{0}</Title>\n".format(os.path.basename(mapin)))
@@ -894,12 +869,12 @@ class ResultsByCycle:
         f.write(" <Cycles>\n")
 
     def write_xml_results_end_macrocyc(self, f, map=False):
-        '''
+        """
         Write the ending lines of each macro cycle for XML output
         Arguments:
-        *f*
-            file object
-        '''
+            f = file object
+            map = boolean to indicate if it is map refinement, Default=False
+        """
         if map:
             f.write(" </Cycles>\n")
         else:
@@ -909,8 +884,8 @@ class ResultsByCycle:
         """
         Write the final lines for XML output
         Arguments:
-        *f*
-            file object
+            f = file object
+            map = boolean to indicate if it is map refinement, Default=False
         """
         f.write(" <Final>\n")
         if not map:
@@ -930,8 +905,8 @@ class ResultsByCycle:
         """
         Write the results of the cycle for XML output
         Arguments:
-        *f*
-            file object
+            f = file object
+            map = boolean to indicate if it is map refinement, Default=False
         """
         f.write("  <Cycle>\n")
         f.write("   <Number>{0}</Number>\n".format(self.cycle + 1))
@@ -948,26 +923,31 @@ class Profile:
     Profiling class to measure elapsed time
     """
 
-    def __init__(self):  # , filename=None, append=True):
-        # self.fout = None
-        # if filename:
-        #    self.set_file(filename, append)
+    def __init__(self):
+        """
+        initialize profiling class
+        ID is the key in Ordered Dictionary class
+        """
         self.prof = OrderedDict()
         self.start_T = 0.0
         self.end_T = 0.0
         self.id = None
 
-    # def set_file(self, filename, append=True):
-    #    try:
-    #        self.fout = open(filename, "a" if append else "w")
-    #    except:
-    #        print(f"Error: Cannot open {filename} for writing.")
-
     def start(self, id):
+        """
+        start timer record
+        Argument:
+            id = id name as key for dictionary
+        """
         self.id = id
         self.start_T = timer()
 
     def end(self, id):
+        """
+        stop timer record and save in dictionary
+        Argument:
+            id = id name as key for dictionary
+        """
         self.end_T = timer()
         prof_time = self.end_T - self.start_T
         if id in self.prof:
@@ -976,11 +956,12 @@ class Profile:
             self.prof[id] = prof_time
 
     def profile_log(self):
+        """
+        print out all records
+        """
         if self.prof:
             for k, v in self.prof.items():
                 print("{0} : {1:.6f} s".format(k, v))
-
-    # def write(self, line, end="\n", flush=True, f)
 
 
 # singleton for profile

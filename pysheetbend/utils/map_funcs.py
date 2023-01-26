@@ -8,17 +8,13 @@ from numpy.fft import fftn, fftshift, ifftn, ifftshift
 from regex import F
 from scipy.signal import resample
 from scipy.ndimage import measurements
-from pysheetbend.shiftfield import effective_radius, fltr
+from typing import Union
+
+# from pysheetbend.shiftfield import effective_radius, fltr
 import pysheetbend.shiftfield_util as sf_util
 from math import fabs
 from pysheetbend.utils.cell import GridInfo
 from gemmi import Position as GPosition, FloatGrid, SpaceGroup
-
-
-class functionType(Enum):
-    STEP = 0
-    LINEAR = 1
-    QUADRATIC = 2
 
 
 def map_grid_position_array(grid_info, structure, index=False):
@@ -50,7 +46,7 @@ def map_grid_position_array(grid_info, structure, index=False):
     return xyz_coordinates
 
 
-def numpy_to_gemmi_grid(numpy_array, unitcell, spacegroup='P1'):
+def numpy_to_gemmi_grid(numpy_array, unitcell, spacegroup="P1"):
     grid = FloatGrid(numpy_array)
     if isinstance(unitcell, list) or isinstance(unitcell, np.ndarray):
         grid.unit_cell.set(
@@ -75,23 +71,23 @@ def update_atoms_position(
     grid_dy,
     grid_dz,
     structure,
-    mode='linear',
+    mode="linear",
     scale=1.0,
 ):
-    '''
+    """
     Interpolate values of atom positions on the grids and update positions.
-    '''
-    modes = ['linear', 'tricubic']
+    """
+    modes = ["linear", "tricubic"]
     if mode not in modes:
-        raise ValueError(f'Invalid mode. Expected one of {modes}')
-    if mode == 'linear':
+        raise ValueError(f"Invalid mode. Expected one of {modes}")
+    if mode == "linear":
         for cra in structure[0].all():
             dx = scale * grid_dx.interpolate_value(cra.atom.pos) * grid_dx.unit_cell.a
             dy = scale * grid_dy.interpolate_value(cra.atom.pos) * grid_dy.unit_cell.b
             dz = scale * grid_dz.interpolate_value(cra.atom.pos) * grid_dz.unit_cell.c
             cra.atom.pos += GPosition(dx, dy, dz)
 
-    if mode == 'tricubic':
+    if mode == "tricubic":
         for cra in structure[0].all():
             dx = (
                 scale
@@ -112,21 +108,28 @@ def update_atoms_position(
 
 
 def update_uiso_values(
-    grid_du, structure, biso_range, mode='linear', scale=1.0, verbose=0
+    grid_du,
+    structure,
+    biso_range,
+    mode="linear",
+    scale=1.0,
+    cycle=0,
+    verbose=0,
+    ucyc=-1,
 ):
-    modes = ['linear', 'tricubic']
+    modes = ["linear", "tricubic"]
     if mode not in modes:
-        raise ValueError(f'Invalid mode. Expected one of {modes}')
+        raise ValueError(f"Invalid mode. Expected one of {modes}")
     if verbose >= 2:
         shift_u = []
-    if mode == 'linear':
+    if mode == "linear":
         for cra in structure[0].all():
             du = scale * grid_du.interpolate_value(cra.atom.pos)
             db = sf_util.u2b(du)
             cra.atom.b_iso = sf_util.limit_biso(
                 (cra.atom.b_iso - db), biso_range[0], biso_range[1]
             )
-    if mode == 'tricubic':
+    if mode == "tricubic":
         for cra in structure[0].all():
             du = scale * grid_du.tricubic_interpolation(cra.atom.pos)
             db = sf_util.u2b(du)
@@ -136,7 +139,10 @@ def update_uiso_values(
             if verbose >= 2:
                 shift_u.append(db)
     if len(shift_u) != 0 and verbose >= 2:
-        outusiocsv = 'shiftuiso_u2b.csv'
+        outusiocsv = f"shiftuiso_u2b_{cycle}"
+        if ucyc >= 0:
+            outusiocsv += f"_{ucyc}"
+        outusiocsv += ".csv"
         fuiso = open(outusiocsv, "w")
         for j in range(0, len(shift_u)):
             fuiso.write("{0}, {1}\n".format(j, shift_u[j]))
@@ -144,11 +150,11 @@ def update_uiso_values(
 
 
 def grid_coord_to_frac(densmap=None, grid_info=None, tempy_flag=False):
-    '''
+    """
     convert grid coordinates to fractional coordinates at the given grid_shape
     TEMPy em map box_size is ZYX format
     GEMMI map grid is XYZ format
-    '''
+    """
     if tempy_flag:
         zpos, ypos, xpos = np.mgrid[
             0 : densmap.z_size(), 0 : densmap.y_size(), 0 : densmap.x_size()
@@ -169,64 +175,124 @@ def grid_coord_to_frac(densmap=None, grid_info=None, tempy_flag=False):
     return frac_coord, ind_pos
 
 
-def fltr(r, radius, function: functionType = functionType(2)):
-    '''
+def fltr(r, radius, function="quadratic"):
+    """
     Radial map filter, returns value from filter function,
     outside radius=0.0
+
     Arguments
-        r: distance
-        radius: radius cutoff
-        function: modes 0 : step, 1 : linear, 2 : quadratic
+    ---------
+        r: float
+            distance
+        radius: float
+            radius cutoff
+        function: {"step", "linear", "quadratic"}
+            function type used to calculate spherical radius
+
     Return
+    ------
         Radius value from filter function
-    '''
+    """
     if r < radius:
-        if function == functionType(2):
+        if function == "quadratic":
             return pow(1.0 - r / radius, 2)
-        elif function == functionType(1):
+        elif function == "linear":
             return 1.0 - r / radius
-        elif function == functionType(0):
+        elif function == "step":
             return 1.0
     else:
         return 0.0
 
 
-def effective_radius(func, radius):
-    '''
-    Gets effective radius from function and radius given
+def effective_radius(radius, function="quadratic"):
+    """
+    Calculates effective radius of the radial function from function and radius given
+
     Arguments
-        func: function modes; 0 : step, 1 : linear, 2 : quadratic
-        radius: radius cutoff
+    ---------
+        radius: float
+            radius cutoff
+        func: {"step", "linear", "quadratic"}
+            function type used to effective radius of the radial function. Default to "quadratic"
+
     Return
+    ------
         effective radius value
-    '''
+    """
     nrad = 1000
     drad = 0.25
-    sum_r = np.zeros(nrad)
-    for i in range(0, nrad):
-        r = drad * (float(i) + 0.5)
-        sum_r[i] = r * r * fabs(fltr(r, radius, func))
-        if i >= 1:
-            sum_r[i] += sum_r[i - 1]
 
-    for i in range(0, nrad):
-        if sum_r[i] > 0.99 * sum_r[nrad - 1]:
-            break
+    r = np.arange(0, nrad)
+    r = drad * (r + 0.5)
+    r_bool = r < radius
+    if function == "quadratic":
+        rf = r[r_bool] * r[r_bool] * pow(1.0 - r[r_bool] / radius, 2)
+    elif function == "linear":
+        rf = r[r_bool] * r[r_bool] * (1.0 - r[r_bool] / radius)
+    elif function == "step":
+        rf = r[r_bool] * r[r_bool]
+
+    r = np.zeros(nrad)
+    r[r_bool] = rf[:]
+    sum_r = np.cumsum(r)
+    i = np.argmax(sum_r > (0.99 * sum_r[-1]))
 
     return drad * (float(i) + 1.0)
 
 
-def prepare_mask_filter(apix: np.ndarray, fltr_radius=15.0, pad=5):
-    '''
-    Prepare filter kernel to be used with scipy.fftconvolve
+def prepare_mask_filter_1(
+    grid_info,
+    filter_radius=15.0,
+    function="quadratic",
+):
+    eff_rad = effective_radius(filter_radius, function)
+    fltr_data_r = np.zeros(grid_info.grid_shape, dtype=np.float32)
+    # x,y,z convention
+    nx, ny, nz = np.indices(grid_info.grid_shape)
+    indi = np.vstack([nx.ravel(), ny.ravel(), nz.ravel()]).T
+    c = indi + grid_info.grid_half  # self.gridshape.g_half
+    c = np.fmod(c, grid_info.grid_shape)
+    c_bool = c < 0
+    c[c_bool[:, 0], 0] += grid_info.grid_shape[0]
+    c[c_bool[:, 1], 1] += grid_info.grid_shape[1]
+    c[c_bool[:, 2], 2] += grid_info.grid_shape[2]
+    c -= grid_info.grid_half
+    # at the start the origin are corrected to 0 so no need offset with origin
+    pos = c[:] * grid_info.voxel_size
+    dist = np.sqrt(np.sum(np.square(pos), axis=1)).reshape(grid_info.grid_shape)
+    dist_bool = np.logical_and((dist < eff_rad), (dist < filter_radius))
+
+    f000 = 0.0
+    if function == "quadratic":
+        rf = pow(1.0 - dist[dist_bool] / filter_radius, 2)
+    elif function == "linear":
+        rf = 1.0 - dist[dist_bool] / filter_radius
+    elif function == "step":
+        rf = 1.0
+    else:
+        raise ValueError('Specify function={"quadratic", "linear", "step"}.')
+    f000 = np.sum(rf)
+    fltr_data_r[dist_bool] = rf[:]
+    # fltr_data_shift = np.fft.fftshift(fltr_data)
+    # return fltr_data_shift, f000
+    del c, c_bool, dist, dist_bool, indi
+    return fltr_data_r, f000
+
+
+def prepare_mask_filter(
+    apix: np.ndarray, fltr_radius=15.0, pad=5, function="quadratic"
+):
+    """
+    Prepare filter kernel to be used with scipy.fftconvolve.
+    Peak at the center
     Arguments
         apix: pixel size [x,y,z]
         fltr_radius: radius for filter
         pad: padding for filter kernel
     Return
         Filter 3D array
-    '''
-    rad = effective_radius(functionType(2), fltr_radius)
+    """
+    rad = effective_radius(fltr_radius, function)
     win_points = int(fltr_radius * 2) + 1 + (pad * 2)
     start = (fltr_radius + pad) * -1
     end = fltr_radius + pad
@@ -239,46 +305,90 @@ def prepare_mask_filter(apix: np.ndarray, fltr_radius=15.0, pad=5):
     rad_x = rad_x ** 2
     rad_y = rad_y ** 2
     rad_z = rad_z ** 2
-    dist = np.sqrt(rad_x[:, None, None] + rad_y[:, None] + rad_x)
-    dist_ind = zip(*np.nonzero(dist < rad))
-    fltr = np.zeros(dist.shape)
-    count = 0
+    dist = np.sqrt(rad_x[:, None, None] + rad_y[:, None] + rad_z)
+    # dist_ind = zip(*np.nonzero(dist < rad))
+    dist_bool = np.logical_and((dist < rad), (dist < fltr_radius))
+    fltr_data = np.zeros(dist.shape, dtype=np.float32)
+    # count = 0
     # f000 = 0.0
     # fill the radial function map
-    for i in dist_ind:
-        rf = fltr(dist[i], fltr_radius, 2)
-        count += 1
-        fltr[i] = rf
-
-    return fltr
-
-
-def make_filter_edge_centered(grid_info, filter_radius=15.0, function=functionType(2)):
-    eff_rad = effective_radius(function, filter_radius)
-    fltr_data_r = np.zeros(grid_info.grid_shape, dtype=np.float32)
-    nx, ny, nz = np.indices(grid_info.grid_shape)
-    indi = np.vstack([nx.ravel(), ny.ravel(), nz.ravel()]).T
-    c = indi + grid_info.grid_half
-    c_bool = c < 0
-    c[c_bool[:, 0], 0] += grid_info.grid_shape[0]
-    c[c_bool[:, 1], 1] += grid_info.grid_shape[1]
-    c[c_bool[:, 2], 2] += grid_info.grid_shape[2]
-    c -= grid_info.grid_half
-    pos = c[:] * grid_info.voxel_size + grid_info.grid_start
-    dist = np.sqrt(np.sum(np.square(pos), axis=1)).reshape(grid_info.grid_shape)
-    dist_bool = np.logical_and((dist < eff_rad), (dist < filter_radius))
-    f000 = 0.0
-    if function == functionType(2):  # quadratic
-        rf = pow(1.0 - dist[dist_bool] / filter_radius, 2)
-    elif function == functionType(1):  # linear
-        rf = 1.0 - dist[dist_bool] / filter_radius
-    elif function == functionType(0):  # step
+    if function == "quadratic":
+        rf = pow(1.0 - dist[dist_bool] / fltr_radius, 2)
+    elif function == "linear":
+        rf = 1.0 - dist[dist_bool] / fltr_radius
+    elif function == "step":
         rf = 1.0
     else:
-        raise ValueError('Choose from function mode 2:Quadratic, 1:Linear, 0:Step.')
+        raise ValueError("Choose from function mode 2:Quadratic, 1:Linear, 0:Step.")
+    # for i in dist_ind:
+    #    rf = fltr(dist[i], fltr_radius, 2)
+    #    count += 1
+    #    fltr_data[i] = rf
+    f000 = np.sum(rf)
+    fltr_data[dist_bool] = rf[:]
+    return fltr_data, f000
+
+
+def make_filter_edge_centered(
+    grid_info, filter_radius=15.0, function="quadratic", verbose=0
+):
+    """
+    Prepare filter kernel for use with fft_convolution_filter.
+    Peak at the edge.
+
+    Arguments
+    ---------
+        grid_info: GridInfo
+            pysheetbend.utils.cell.GridInfo object
+        filter_radius: float
+            radius for filter
+        function: {"step","linear","quadratic"}
+            function type to use for calculating spherical filter radius
+        verbose:
+            verbosity
+
+    Return
+    ------
+        Filter 3D array, sum of values
+    """
+    eff_rad = effective_radius(filter_radius, function)
+    fltr_data_r = np.zeros(grid_info.grid_shape, dtype=np.float32)
+    x, y, z = grid_info.grid_shape
+    if grid_info.grid_shape[0] % 2:  # odd
+        # to make sure dist 0.0 is at the start after calculation
+        rad_x = np.arange(-np.ceil(x / 2.0), np.floor(x / 2.0))
+        rad_y = np.arange(-np.ceil(y / 2.0), np.floor(y / 2.0))
+        rad_z = np.arange(-np.ceil(z / 2.0), np.floor(z / 2.0))
+    else:
+        rad_x = np.arange(-np.floor(x / 2.0), np.ceil(x / 2.0))
+        rad_y = np.arange(-np.floor(y / 2.0), np.ceil(y / 2.0))
+        rad_z = np.arange(-np.floor(z / 2.0), np.ceil(z / 2.0))
+
+    rad_x[rad_x < 0] += x
+    rad_y[rad_y < 0] += y
+    rad_z[rad_z < 0] += z
+    rad_x -= grid_info.grid_half[0]
+    rad_y -= grid_info.grid_half[1]
+    rad_z -= grid_info.grid_half[2]
+    rad_x *= grid_info.voxel_size[0] + grid_info.grid_start[0]
+    rad_y *= grid_info.voxel_size[1] + grid_info.grid_start[1]
+    rad_z *= grid_info.voxel_size[2] + grid_info.grid_start[2]
+    rad_x = rad_x ** 2
+    rad_y = rad_y ** 2
+    rad_z = rad_z ** 2
+    dist = np.sqrt(rad_x[:, None, None] + rad_y[:, None] + rad_z)
+    dist_bool = np.logical_and((dist < eff_rad), (dist < filter_radius))
+
+    if function == "quadratic":
+        rf = pow(1.0 - dist[dist_bool] / filter_radius, 2)
+    elif function == "linear":
+        rf = 1.0 - dist[dist_bool] / filter_radius
+    elif function == "step":
+        rf = np.full_like(dist, fill_value=1.0)
     f000 = np.sum(rf)
     fltr_data_r[dist_bool] = rf[:]
-    print(f'f000 = {f000:.4f}')
+    if verbose >= 1:
+        print(f"f000 = {f000:.4f}")
 
     return fltr_data_r, f000
 
@@ -287,11 +397,11 @@ def fft_convolution_filter(
     data_arr: np.ndarray,
     filter: np.ndarray,
     scale,
-    fft_obj,
-    ifft_obj,
     grid_info: GridInfo,
+    fft_obj=None,
+    ifft_obj=None,
 ):
-    '''
+    """
     Returns filtered/covolved data
     Arguments:
         data_arr: numpy array of data
@@ -300,7 +410,10 @@ def fft_convolution_filter(
         fft_obj: planned fft object
         ifft_obj: planned ifft object
         grid_info: GridInfo class containing grid info
-    '''
+    """
+    if fft_obj is None:
+        fft_obj, ifft_obj = sf_util.plan_fft_ifft(gridinfo=grid_info.grid_shape)
+
     data_r = np.zeros(grid_info.grid_shape, dtype=np.float32)
     data_r = data_arr.copy()
     fltr_input = np.zeros(grid_info.grid_shape, dtype=np.float32)
@@ -403,13 +516,13 @@ def calculate_map_contour(map_data, sigma_factor: float = 1.5):
 
 
 def cor_mod_array(a, b):
-    '''
+    """
     Returns corrected remainder of division. If remainder <0,
     then adds value b to remainder.
     Arguments
         a: array of Dividend (x,y,z indices)
         b: array of Divisor (x,y,z indices)
-    '''
+    """
     c = np.fmod(a, b)
     d = np.transpose(np.nonzero(c < 0))
     # d, e = np.nonzero(c<0)
@@ -449,7 +562,7 @@ def calculate_pixel_size(cell_size, grid_shape):
 
 def resample_data_by_boxsize(map_data, new_shape):
     if isinstance(map_data, gemmi.FloatGrid):
-        grid_data = np.array(map_data, copy=False)  # , dtype=np.float32)
+        grid_data = np.array(map_data, copy=False, dtype=np.float32)
         grid_data = resample(grid_data, new_shape[0], axis=0)
         grid_data = resample(grid_data, new_shape[1], axis=1)
         grid_data = resample(grid_data, new_shape[2], axis=2)
@@ -473,15 +586,22 @@ def make_mask_from_maps(
     maps,
     grid_info,
     resolution=2.0,
-    func: functionType = functionType(2),
+    func="quadratic",
     lpfilt_pre=False,
     lpfilt_post=False,
     ref_scale=False,
     radcyc=15.0,
+    verbose=0,
 ):
     # amplitude match
-    fft_obj = sf_util.plan_fft(grid_info, input_dtype=np.float32)
-    ifft_obj = sf_util.plan_ifft(grid_info, input_dtype=np.complex64)
+    fft_obj, ifft_obj = sf_util.plan_fft_ifft(gridinfo=grid_info)
+    # fft_obj = sf_util.plan_fft(grid_info, input_dtype=np.float32)
+    # ifft_obj = sf_util.plan_ifft(grid_info, input_dtype=np.complex64)
+    # make sure maps are of same grid shape/size
+    if not np.all(np.array(maps[0].shape) == grid_info.grid_shape):
+        maps[0] = resample_data_by_boxsize(maps[0], grid_info.grid_shape)
+    if not np.all(np.array(maps[1].shape) == grid_info.grid_shape):
+        maps[1] = resample_data_by_boxsize(maps[1], grid_info.grid_shape)
 
     scaled_maps = amplitude_match(
         maps[0],
@@ -504,14 +624,32 @@ def make_mask_from_maps(
         combined_map,
         filt_data_r,
         1.0 / f000,
+        grid_info,
         fft_obj,
         ifft_obj,
-        grid_info,
     )
-    mmapt = calculate_map_threshold(mmap)
-    mmap = np.ma.masked_less(mmap, mmapt)
+    if verbose >= 5:
+        print(f"{mmap.min()}, {mmap.max()}, {mmap.mean()}, {mmap.std()}")
+    mmap_ma = np.ma.masked_less(mmap, mmap.mean())
 
-    return mmap
+    return mmap, mmap_ma
+
+
+def downsample_mask(mask_array, downsamp_shape):
+    """
+    Downsample mask array of bool type. Input mask array as int type
+    Args:
+        mask_array : Mask array in int type
+        downsamp_shape: shape to be resampled into
+
+    Returns:
+        np.array: downsampled array in bool type
+    """
+    mask_array = resample(mask_array, downsamp_shape[0], axis=0)
+    mask_array = resample(mask_array, downsamp_shape[1], axis=1)
+    mask_array = resample(mask_array, downsamp_shape[2], axis=2)
+
+    return np.ma.masked_less(mask_array, mask_array == 0).mask
 
 
 def make_fourier_shell(map_shape, keep_shape=False, fftshift=True, normalise=False):
@@ -587,6 +725,8 @@ def amplitude_match(
     fft_obj=None,
     ifft_obj=None,
 ):
+    if fft_obj is None:
+        fft_obj, ifft_obj = sf_util.plan_fft_ifft(gridinfo=grid1_info)
     # Taken from Agnel's code in TEMPy library / CCPEM
     # assuming maps used are always cubic (same dimension x,y,z)
     ft1 = fft_obj(emmap1)
@@ -734,7 +874,7 @@ def amplitude_match(
     if reso is not None:
         cutoff1 = grid1_info.voxel_size[0] / float(reso)
         cutoff2 = grid2_info.voxel_size[0] / float(reso)
-        if lpfilt_pre and not lpfilt_post:
+        if lpfilt_post and not lpfilt_pre:
             ftfltr1 = tanh_lowpass(
                 grid1_info.grid_shape, cutoff1, fall=0.2, keep_shape=False
             )
@@ -879,6 +1019,8 @@ def calc_diffmap(
 
     # global scaling of amplitudes
     if samegrid:
+        if verbose >= 2:
+            print("Matching maps amplitude")
         diff1, diff2 = amplitude_match(
             emmap1,
             emmap2,
@@ -903,7 +1045,8 @@ def calc_diffmap(
             diff2[:] = diff2 + float(-min_scaled_maps)
 
         # calculate difference map
-        print("Calculating difference map")
+        if verbose >= 2:
+            print("Calculating difference map")
         # store scaled maps
         scaledmap1 = diff1.copy()
         scaledmap2 = diff2.copy()
@@ -918,6 +1061,9 @@ def calc_diffmap(
             diff1[:] = diff1 * (diff1 > 0.0)
             diff2[:] = diff2 * (diff2 > 0.0)
 
+        # shift-back
+        # scaledmap1[:] = scaledmap1 - float(-min_scaled_maps)
+        # scaledmap2[:] = scaledmap2 - float(-min_scaled_maps)
         return scaledmap1, scaledmap2, diff1
 
 
@@ -935,8 +1081,7 @@ def global_scale_maps(
     ifft_obj=None,
 ):
     if fft_obj is None:
-        fft_obj = sf_util.plan_fft(ref_grid_info, input_dtype=np.float32)
-        ifft_obj = sf_util.plan_ifft(target_grid_info, input_dtype=np.complex64)
+        fft_obj, ifft_obj = sf_util.plan_fft_ifft(gridinfo=ref_grid_info)
 
     scale_ref, scale_tgt, = amplitude_match(
         ref_map,
@@ -990,17 +1135,17 @@ def make_map_cubic(mapin, grid_info):
         mapin.grid.unit_cell.beta,
         mapin.grid.unit_cell.gamma,
     )
-    newmap.grid.spacegroup = gemmi.SpaceGroup('P1')
+    newmap.grid.spacegroup = gemmi.SpaceGroup("P1")
     return newmap, new_gridinfo
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from pysheetbend.utils import fileio
     from pysheetbend.utils.dencalc import calculate_density_with_boxsize
 
-    mapin = '/home/swh514/Projects/data/EMD-3488/map/emd_3488.map'
+    mapin = "/home/swh514/Projects/data/EMD-3488/map/emd_3488.map"
     # pdbin = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1_cryst1.ent'
-    pdbin = '/home/swh514/Projects/work_and_examples/shiftfield/EMD-3488/4angs_lowres/translate_4angxyz.pdb'
+    pdbin = "/home/swh514/Projects/work_and_examples/shiftfield/EMD-3488/4angs_lowres/translate_4angxyz.pdb"
     m, gridinfo = fileio.read_map(mapin)
     model, hetatm = fileio.get_structure(pdbin)
     apix0 = gridinfo.voxel_size
@@ -1035,15 +1180,15 @@ if __name__ == '__main__':
     fileio.write_map_as_MRC(
         grid_data=scm1,
         unitcell=m.grid.unit_cell.parameters,
-        outpath='scale_emd3488.mrc',
+        outpath="scale_emd3488.mrc",
     )
     fileio.write_map_as_MRC(
         grid_data=scm2,
         unitcell=m.grid.unit_cell.parameters,
-        outpath='scale_calcmap.mrc',
+        outpath="scale_calcmap.mrc",
     )
     fileio.write_map_as_MRC(
         grid_data=dmap,
         unitcell=m.grid.unit_cell.parameters,
-        outpath='diffmap.mrc',
+        outpath="diffmap.mrc",
     )

@@ -37,3 +37,11 @@ class GridInfo:
             )
         )
         self.origin = origin
+
+    def __repr__(self) -> str:
+        info = f" INFO: Grid shape : {self.grid_shape}\n"
+        info += f" INFO: Voxel size : {self.voxel_size}\n"
+        info += f" INFO: Grid start : {self.grid_start}\n"
+        info += f" INFO: Origin : {self.origin}\n"
+
+        return info

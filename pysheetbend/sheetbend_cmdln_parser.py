@@ -23,7 +23,7 @@ class SheetbendParser:
         Parse input arguments
         """
         # parser = argparse.ArgumentParser()
-        parser.prog = "PySheetbend"
+        parser.prog = "PySheetbendEM"
         parser.description = """Shift-field refinement of macromolecular
         atomic models for cryo-EM data."""
         # parser = parser.add_parsers(dest="command")
@@ -250,6 +250,19 @@ class SheetbendParser:
             ),
             metavar="Radius_scale",
             default=4.0,
+            required=False,
+        )
+
+        ref.add_argument(
+            "--coor_tol",
+            type=float,
+            dest="coor_tol",
+            help=(
+                "Coordinates RMSD tolerance for checking convergence."
+                "(Default = 0.01)"
+            ),
+            metavar="Coord_tol",
+            default=0.01,
             required=False,
         )
 

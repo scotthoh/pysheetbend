@@ -12,6 +12,7 @@ from pysheetbend.sheetbend_cmdln_parser import SheetbendParser
 # from . import __version__
 import pysheetbend.refine_map_to_map
 import pysheetbend.refine_xyz_to_map
+import pysheetbend.refine_xyz_to_map_resoloop
 
 orig_stdout = sys.stdout
 orig_stderr = sys.stderr
@@ -50,6 +51,7 @@ def main():
     modes = dict(
         refine_model_to_map=pysheetbend.refine_xyz_to_map,
         refine_map_to_map=pysheetbend.refine_map_to_map,
+        refine_model_to_map2=pysheetbend.refine_xyz_to_map_resoloop,
     )
     for n in modes:
         p = subparser.add_parser(n)
@@ -63,6 +65,8 @@ def main():
     if args.command == 'refine_model_to_map':
         modes[args.command].main(args)  # sb_args)
     if args.command == 'refine_map_to_map':
+        modes[args.command].main(args)  # sb_args)
+    if args.command == 'refine_model_to_map2':
         modes[args.command].main(args)  # sb_args)
     print(f"# Job finished : {datetime.datetime.now()}")
 

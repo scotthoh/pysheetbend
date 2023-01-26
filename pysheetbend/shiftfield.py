@@ -6,6 +6,8 @@ import numpy as np
 from timeit import default_timer as timer
 from numba import njit
 from math import fabs
+from pysheetbend.shiftfield_util import plan_fft_ifft
+from pysheetbend.utils import map_funcs
 
 # from memory_profiler import profile
 
@@ -68,66 +70,35 @@ def radial_filter_func(indi, fltr_data_r, r, r_ind, fltr_rad, func):
 
 
 # @profile
-def prepare_filter(radcyc, function, g_reci, g_sam, g_half, origin, apix, array_shape):
+def prepare_filter(radcyc, function, gridinfo, verbose):
     """
     Sets the radius and function to use
     Arguments
-    *radcyc*
-      radius of the filter
-    *function*
-      0 = step, 1 = linear, 2 = quadratic
-    *densmap*
-      reference density map
+        radcyc: radius of the filter
+        function: 0 = step, 1 = linear, 2 = quadratic
+        densmap: reference density map
+        verbose: verbosity
+    Return
+        N-D filter data array, weight
     """
-    verbose = 0
-    # g_reci = np.array(g_reci)
-    # g_sam = np.array(g_sam)
-    # g_half = np.array(g_half)
-    """if function == 'step':
-        self.function = 0
-    elif function == 'linear':
-        self.function = 1
-    elif function == 'quadratic':
-        self.function = 2
-    """
-    # function = step, linear, quadratic
+    g_shape = gridinfo.grid_shape
     # determine effective radius of radial function
-    # self.gridshape = GridDimension(densmap)
-    start = timer()
     rad = effective_radius(function, radcyc)
-    end = timer()
-    print("Effective radius : {0}s".format(end - start))
-    # fltr_data_r = np.zeros(g_sam, dtype=np.float64)
-    fltr_data_r = np.zeros(g_sam, dtype=np.float32)
-
+    fltr_data_r = np.zeros(g_shape, dtype=np.float32)
     # x,y,z convention
-    # origin = np.array((origin[2], origin[1], origin[0]))
-    if isinstance(apix, tuple):
-        apix = np.array([apix[0], apix[1], apix[2]])
-    elif not isinstance(apix, np.ndarray):
-        apix = np.array([apix, apix, apix])
-    # g_half = (g_real[0]//2, g_real[1]//2, g_real[0]//2+1)
-    # SB = StructureBlurrer()
-    # gt = SB.maptree(densmap)
-    # print("1")
-    nx, ny, nz = np.indices(array_shape)
-    # nx, ny, nz = array_shape
-    # xg, yg, zg = np.mgrid[0:nx, 0:ny, 0:nz]
+    nx, ny, nz = np.indices(g_shape)
     indi = np.vstack([nx.ravel(), ny.ravel(), nz.ravel()]).T
-    g_sam = np.array(g_sam)
-    g_half = np.array(g_half)
-    c = indi + g_half  # self.gridshape.g_half
-    c = np.fmod(c, g_sam)
+    c = indi + gridinfo.grid_half  # self.gridshape.g_half
+    c = np.fmod(c, g_shape)
     c_bool = c < 0
-    c[c_bool[:, 0], 0] += g_sam[0]
-    c[c_bool[:, 1], 1] += g_sam[1]
-    c[c_bool[:, 2], 2] += g_sam[2]
-    c -= g_half
-    pos = c[:] * apix + origin
-    r = np.sqrt(np.sum(np.square(pos), axis=1)).reshape(g_sam)
+    c[c_bool[:, 0], 0] += g_shape[0]
+    c[c_bool[:, 1], 1] += g_shape[1]
+    c[c_bool[:, 2], 2] += g_shape[2]
+    c -= gridinfo.grid_half
+    # at the start the origin are corrected to 0 so no need offset with origin
+    pos = c[:] * gridinfo.voxel_size
+    r = np.sqrt(np.sum(np.square(pos), axis=1)).reshape(g_shape)
     r_bool = np.logical_and((r < rad), (r < radcyc))
-    start = timer()
-
     if function == 2:
         rf = pow(1.0 - r[r_bool] / radcyc, 2)
     elif function == 1:
@@ -136,15 +107,11 @@ def prepare_filter(radcyc, function, g_reci, g_sam, g_half, origin, apix, array_
         rf = 1.0
     fltr_data_r[r_bool] = rf[:]
     f000 = np.sum(rf)
-    # fltr_data_r, f000 = radial_filter_func(indi, fltr_data_r, r, r_ind, fltr_rad, func)
-    end = timer()
-    print("Fltr data r : {0}s".format(end - start))
-
     # calc scale factor
     # scale = 1.0 / f000
-    if verbose >= 1:
+    if verbose >= 2:
         print(" f000, ", f000)
-    del c, c_bool
+    del c, c_bool, r, r_bool, indi
     return fltr_data_r, f000
 
 
@@ -347,7 +314,17 @@ def cor_mod(a, b):
 
 # @profile
 def shift_field_coord(
-    cmap, dmap, mmap, rad, fltr, origin, apix, fft_obj, ifft_obj, cyc, verbose=0
+    cmap,
+    dmap,
+    mmap,
+    rad,
+    fltr,
+    gridinfo,
+    fft_obj,
+    ifft_obj,
+    cyc,
+    verbose=0,
+    timelog=None,
 ):
     """
     Returns 3 map instances for shifts in x,y,z directions
@@ -372,61 +349,46 @@ def shift_field_coord(
     """
     # tracemalloc.start()
     # set the numbers for the grids in list form
-    g_reci = (cmap.shape[0], cmap.shape[1], cmap.shape[2] // 2 + 1)
-    # g_real = (g_reci[0], g_reci[1], int(g_reci[2]-1)*2)
-    g_real = (cmap.shape[0], cmap.shape[1], cmap.shape[2])
-    ch = (g_real[0] // 2, g_real[1] // 2, g_real[2] // 2)
+    g_reci = gridinfo.grid_reci
+    g_shape = gridinfo.grid_shape
+    g_half = gridinfo.grid_half
 
     # calculate map coefficients
     data_r = cmap.copy()
-    if verbose >= 1:
-        start = timer()
+    timelog.start("FFTCalc")
     xdata_c = fft_obj(data_r)
     xdata_c = xdata_c.conjugate().copy()
-    if verbose >= 1:
-        end = timer()
-        print("FFT Calc Map : {0} s".format(end - start))
+    timelog.end("FFTCalc")
     # print(data_r.dtype)
     # print(cmap.dtype)
     # print(xdata_c.dtype)
     # calculate gradient map coefficients
-    xdata_c, ydata_c, zdata_c = gradient_map_calc(xdata_c, g_reci, g_real, ch)
+    xdata_c, ydata_c, zdata_c = gradient_map_calc(xdata_c, g_reci, g_shape, g_half)
 
     # calculate gradient maps
     # fft complex to real
-    if verbose >= 1:
-        start = timer()
     zdata_c = zdata_c.conjugate().copy()
-    print("zdata_c {0}".format(zdata_c.shape))
+    # print("zdata_c {0}".format(zdata_c.shape))
     ydata_c = ydata_c.conjugate().copy()
     xdata_c = xdata_c.conjugate().copy()
-    if verbose >= 1:
-        end = timer()
-        print("3x conjugate : {0} s".format(end - start))
-    print("data_r shape {0}".format(data_r.shape))
+    # print("data_r shape {0}".format(data_r.shape))
     # zdata_r = np.zeros(data_r.shape, dtype=np.float64)
     # ydata_r = np.zeros(data_r.shape, dtype=np.float64)
     # xdata_r = np.zeros(data_r.shape, dtype=np.float64)
-    zdata_r = np.zeros(data_r.shape, dtype=np.float32)
-    ydata_r = np.zeros(data_r.shape, dtype=np.float32)
-    xdata_r = np.zeros(data_r.shape, dtype=np.float32)
-    zdata_r[:] = 1e-6
-    ydata_r[:] = 1e-6
-    xdata_r[:] = 1e-6
-    print("zdata_r {0}".format(zdata_r.shape))
+    zdata_r = np.zeros(g_shape, dtype=np.float32)
+    ydata_r = np.zeros(g_shape, dtype=np.float32)
+    xdata_r = np.zeros(g_shape, dtype=np.float32)
+    # print("zdata_r {0}".format(zdata_r.shape))
     # print("ifftw")
     # print("output shape")
     # print(ifft_obj.output_shape)
     # print(ifft_obj.output_dtype)
     # print(zdata_r.dtype)
-    if verbose >= 1:
-        start = timer()
+    timelog.start("IFFTCalc")
     zdata_r = ifft_obj(zdata_c, zdata_r)
-    if verbose >= 1:
-        end = timer()
-        print("first ifft ", end - start)
     ydata_r = ifft_obj(ydata_c, ydata_r)
     xdata_r = ifft_obj(xdata_c, xdata_r)
+    timelog.end("IFFTCalc")
     # if verbose >= 6:
     #    writeMap(xdata_r, origin, apix, cmap.shape, f"gradx1map_{cyc}.map")
     #    writeMap(ydata_r, origin, apix, cmap.shape, f"gradx2map_{cyc}.map")
@@ -435,75 +397,24 @@ def shift_field_coord(
     # print(x1map.apix, x2map.apix, x3map.apix)
     # print(x1map.origin, x2map.origin, x3map.origin)
     # copy map
-    x1map_r = xdata_r.copy()
-    x2map_r = ydata_r.copy()
-    x3map_r = zdata_r.copy()
-    print(len(x1map_r[x1map_r == 0]))
-    print(len(x2map_r[x2map_r == 0]))
-    print(len(x3map_r[x3map_r == 0]))
-    # end map preparation
-    # dmap = dmap.astype('float64')
-    # calculate XTY and apply mask
-    # ymap=diffmap , mmap = mask
-    # ymap = np.zeros(dmap.shape)
-    # mmap = np.zeros(mask.shape)
-    # if verbose >= 3:
-    #    writeMap(dmap, origin, apix, cmap.shape, f"ymap_{cyc}.map")
-
-    # ymap = dmap.copy()
-    # mmap = mask.copy()
-    # ymap_m = ma.masked_array(ymap, mask=mmap).data
-    # x1map_m = ma.masked_array(x1map_r, mask=mmap).data
-    # x1map_r*ymap*mmap
-    # x2map_m = ma.masked_array(x2map_r, mask=mmap).data
-    # x3map_m = ma.masked_array(x3map_r, mask=mmap).data
-
-    y1map = x1map_r * dmap
-    # x1map_r*ymap*mmap
-    y2map = x2map_r * dmap
-    y3map = x3map_r * dmap
-    # y2map = x2map_r*ymap*mmap
-    # y3map = x3map_r*ymap*mmap
-
-    # print(np.count_nonzero(y1map==0.0), np.count_nonzero(y2map==0.0), np.count_nonzero(y3map==0.0))
-    # calculate XTX  (removed multiply with mask)
-    x11map = x1map_r * x1map_r
-    # print(np.array_equal(x11map, x1map.fullMap))
-    # was  x12map = x1map_r*x2map_r
-    x12map = x1map_r * x2map_r
-    x13map = x1map_r * x3map_r
-    x22map = x2map_r * x2map_r
-    x23map = x2map_r * x3map_r
-    x33map = x3map_r * x3map_r
-    '''
-    if verbose >= 6:
-        writeMap(x11map, origin, apix, cmap.shape, f"x11map_{cyc}.map")
-        writeMap(x12map, origin, apix, cmap.shape, f"x12map_{cyc}.map")
-        writeMap(x13map, origin, apix, cmap.shape, f"x13map_{cyc}.map")
-        writeMap(x22map, origin, apix, cmap.shape, f"x22map_{cyc}.map")
-        writeMap(x23map, origin, apix, cmap.shape, f"x23map_{cyc}.map")
-        writeMap(x33map, origin, apix, cmap.shape, f"x33map_{cyc}.map")
-        writeMap(y1map, origin, apix, cmap.shape, f"y1map_{cyc}.map")
-        writeMap(y2map, origin, apix, cmap.shape, f"y2map_{cyc}.map")
-        writeMap(y3map, origin, apix, cmap.shape, f"y3map_{cyc}.map")
-    '''
-    # y1map = y1map.astype('float32')
-    # y2map = y2map.astype('float32')
-    # y3map = y3map.astype('float32')
-
-    # filter
-    # x33map1 = Map(np.zeros(cmap.fullMap.shape),
-    #              cmap.origin,
-    #              cmap.apix[0],
-    #              'mapname',)
-    # x33map1.fullMap = x33map
-    # x33map1.update_header()
-    # x33map1.write_to_MRC_file('x33_map1.map')
-
-    # dmap.set_apix_tempy()
-    start = timer()
-    fltr_data_r, scale = prepare_filter(
-        rad, fltr, g_reci, g_real, ch, origin, apix, dmap.shape
+    # x1map_r = xdata_r.copy()
+    # x2map_r = ydata_r.copy()
+    # x3map_r = zdata_r.copy()
+    # calculate XTY
+    y1map = xdata_r * dmap
+    y2map = ydata_r * dmap
+    y3map = zdata_r * dmap
+    # calculate XTX
+    x11map = xdata_r * xdata_r
+    x12map = xdata_r * ydata_r
+    x13map = xdata_r * zdata_r
+    x22map = ydata_r * ydata_r
+    x23map = ydata_r * zdata_r
+    x33map = zdata_r * zdata_r
+    timelog.start("Filter")
+    # fltr_data_r, scale = prepare_filter(rad, fltr, gridinfo, verbose)
+    fltr_data_r, scale = map_funcs.make_filter_edge_centered(
+        grid_info=gridinfo, filter_radius=rad, function="quadratic", verbose=verbose
     )
     # if verbose >= 3:
     #    print(f"ymap shape {ymap.shape}")
@@ -513,34 +424,34 @@ def shift_field_coord(
     #    writeMap(filt_ymap, origin, apix, cmap.shape, f"filt_ymap{cyc}.map")
     # dmap_gt = SB.maptree(dmap)
     y1map = mapfilter(
-        y1map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        y1map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     y2map = mapfilter(
-        y2map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        y2map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     y3map = mapfilter(
-        y3map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        y3map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     x11map = mapfilter(
-        x11map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        x11map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     x12map = mapfilter(
-        x12map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        x12map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     x13map = mapfilter(
-        x13map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        x13map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     x22map = mapfilter(
-        x22map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        x22map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     x23map = mapfilter(
-        x23map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        x23map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     x33map = mapfilter(
-        x33map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        x33map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
-    end = timer()
-    '''
+    timelog.end("Filter")
+    """
     if verbose >= 6:
         writeMap(x11map, origin, apix, cmap.shape, f"filt_x11map_{cyc}.map")
         writeMap(x12map, origin, apix, cmap.shape, f"filt_x12map_{cyc}.map")
@@ -551,8 +462,7 @@ def shift_field_coord(
         writeMap(y1map, origin, apix, cmap.shape, f"filt_y1map_{cyc}.map")
         writeMap(y2map, origin, apix, cmap.shape, f"filt_y2map_{cyc}.map")
         writeMap(y3map, origin, apix, cmap.shape, f"filt_y3map_{cyc}.map")
-    '''
-    print("Filter maps : {0} s".format(end - start))
+    """
 
     # x33map1.fullMap = x33map
     # x33map1.update_header()
@@ -560,9 +470,9 @@ def shift_field_coord(
     # calculate U shifts
     mmap_f = np.ravel(mmap)
 
-    mat_size = cmap.size - np.count_nonzero(mmap_f)
-    print(cmap.size, np.count_nonzero(mmap), np.count_nonzero(mmap_f), mat_size)
-    start = timer()
+    mat_size = np.count_nonzero(~mmap_f)
+    # print(cmap.size, np.count_nonzero(mmap), np.count_nonzero(mmap_f), mat_size)
+    timelog.start("SetMatrix")
     # these use a lot of memory. see how to reduce
     m = np.zeros((mat_size, 3, 3), dtype=np.float32)
     v = np.zeros((mat_size, 3), dtype=np.float32)
@@ -575,15 +485,15 @@ def shift_field_coord(
     y1map_f = np.ravel(y1map)[~mmap_f]
     y2map_f = np.ravel(y2map)[~mmap_f]
     y3map_f = np.ravel(y3map)[~mmap_f]
-    print(len(x11_f[x11_f == 0]))
-    print(len(x12_f[x12_f == 0]))
-    print(len(x13_f[x13_f == 0]))
-    print(len(x22_f[x22_f == 0]))
-    print(len(x23_f[x23_f == 0]))
-    print(len(x33_f[x33_f == 0]))
-    print(len(y1map_f[y1map_f == 0]))
-    print(len(y2map_f[y2map_f == 0]))
-    print(len(y3map_f[y3map_f == 0]))
+    # print(len(x11_f[x11_f == 0]))
+    # print(len(x12_f[x12_f == 0]))
+    # print(len(x13_f[x13_f == 0]))
+    # print(len(x22_f[x22_f == 0]))
+    # print(len(x23_f[x23_f == 0]))
+    # print(len(x33_f[x33_f == 0]))
+    # print(len(y1map_f[y1map_f == 0]))
+    # print(len(y2map_f[y2map_f == 0]))
+    # print(len(y3map_f[y3map_f == 0]))
     # flatten arrays and assign to matrix and vector
     v[:, 0] = y1map_f
     v[:, 1] = y2map_f
@@ -597,16 +507,15 @@ def shift_field_coord(
     m[:, 1, 2] = x23_f
     m[:, 2, 1] = x23_f
     m[:, 2, 2] = x33_f
-    print("check determinant")
+    # print("check determinant")
     # det_m = np.linalg.det(m)
     # count_m0 = 0
     # for im in det_m:
     #  if im == 0:
     #    count_m0 += 1
     # print(count_m0)
-    end = timer()
-    print("Set matrix : {0} s".format(end - start))
-    start = timer()
+    timelog.end("SetMatrix")
+    timelog.start("LINALG")
     try:
         v[:] = np.linalg.solve(m[:], v[:])
         # v[:] = linalg.solve(m[:], v[:])
@@ -620,9 +529,7 @@ def shift_field_coord(
     # v[:], residuals, rank, s = np.linalg.lstsq(m[:], v[:])
 
     # v = solvelinalg(m[:], v[:])
-    end = timer()
-    print("Solve linalg : {0} s".format(end - start))
-    start = timer()
+    timelog.end("LINALG")
     x1map_f = np.zeros(cmap.size, dtype=np.float32)
     x2map_f = np.zeros(cmap.size, dtype=np.float32)
     x3map_f = np.zeros(cmap.size, dtype=np.float32)
@@ -707,7 +614,16 @@ def metric_reci_lengthsq(x, y, z, celldim):
 
 
 def shift_field_uiso(
-    cmap, dmap, mmap, rad, fltr, origin, apix, fft_obj, ifft_obj, g_cell, verbose=0
+    cmap,
+    dmap,
+    mmap,
+    rad,
+    fltr,
+    gridinfo,
+    unitcell,
+    fft_obj=None,
+    ifft_obj=None,
+    verbose=0,
 ):
     """
     Performs shift field refinement on isotropic U values
@@ -729,9 +645,11 @@ def shift_field_uiso(
     *ifft_obj*
       Planned ifft object
     """
-    g_reci = (cmap.shape[0], cmap.shape[1], cmap.shape[2] // 2 + 1)
-    g_real = (cmap.shape[0], cmap.shape[1], cmap.shape[2])
-    ch = (g_real[0] // 2, g_real[1] // 2, g_real[2] // 2)
+    g_reci = gridinfo.grid_reci
+    g_shape = gridinfo.grid_shape
+    g_half = gridinfo.grid_half
+    if fft_obj is None:
+        fft_obj, ifft_obj = plan_fft_ifft(gridinfo=gridinfo)
     # fullMap is numpy array
     data_r = cmap
     if verbose >= 1:
@@ -742,7 +660,7 @@ def shift_field_uiso(
         end = timer()
         print("first ft ", end - start)
     # calculate gradient map coefficients
-    data_c = gradient_map_iso_calc(data_c, g_reci, g_real, ch, g_cell)
+    data_c = gradient_map_iso_calc(data_c, g_reci, g_shape, g_half, unitcell)
     """for cz in range(0, g_reci_[0]):    # z
         for cy in range(0, g_reci_[1]):     # y
             for cx in range(0, g_reci_[2]):    # x
@@ -771,15 +689,13 @@ def shift_field_uiso(
 
     # filter maps
     # dmap.set_apix_tempy()
-    fltr_data_r, scale = prepare_filter(
-        rad, fltr, g_reci, g_real, ch, origin, apix, dmap.shape
-    )
+    fltr_data_r, scale = prepare_filter(rad, fltr, gridinfo, verbose)
 
     y1map = mapfilter(
-        y1map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        y1map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     x11map = mapfilter(
-        x11map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_real, g_reci
+        x11map, fltr_data_r, 1.0 / scale, fft_obj, ifft_obj, g_shape, g_reci
     )
     # mf = RadialFilter(rad, fltr, g_reci, g_real, ch,
     #                  dmap.origin, dmap.apix, dmap.fullMap.shape)

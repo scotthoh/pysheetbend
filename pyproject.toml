@@ -6,5 +6,6 @@ dependencies = [
     "pandas >=0.24.2 ",
     "emda",
     "gemmi >= 0.5.7",
+    "ccpem-utils",
 ]
 build-backend = "setuptools.build_meta"

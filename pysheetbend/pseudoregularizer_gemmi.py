@@ -1,43 +1,71 @@
 from __future__ import print_function
+from typing import OrderedDict, Union
+import pathlib
 import numpy as np
 from timeit import default_timer as timer
 from dataclasses import dataclass
 import gemmi
+from ccpem_pyutils.other.cluster import cluster_coord_features
+from ccpem_pyutils.model.gemmi_model_utils import (
+    GemmiModelUtils,
+    get_residue_attribute,
+    set_bfactor_attributes,
+)
 
 
 @dataclass
 class ConnectedResidues:
-    C: int  # chain index
-    R: int  # residue index
+    C: str  # chain name
+    S: str  # seq id
+    R: str  # res name
 
 
 class Pseudoregularize:
-    '''
+    """
     Pseudoregularizer
     Pseudoregularize the target model against the reference/input model
-    '''
+    """
 
     def __init__(self, original_structure: gemmi.Structure, model_number=0, verbose=0):
-        '''
+        """
         make a list of fragments of contiguous residues from the input structure
         Arguments:
             original_structure: GEMMI structure instance
             model_number: model number in structure instance, default: 0, first model
             verbose: verbosity
-        '''
+        """
         start = timer()
         self.mol_ref = original_structure
+        self.model_number = model_number
+        self.gemmimodelutils = GemmiModelUtils(original_structure)
         self.crad = 2.4
         self.verbose = verbose
         # list of fragments of atoms, len(fragsList) = number of fragments
         self.fragsList = []
-        for c in range(len(original_structure[model_number])):
+        self.frags_cluster = []
+        fragments_obtained = self.get_fragment_by_chains()
+        if not fragments_obtained:
+            print("ERROR: List containing fragments is empty!")
+            exit()
+
+        endtime = timer()
+        if self.verbose >= 10:
+            print("Pseudoreg Init Time : {0:.4f}".format(endtime - start))
+
+    def get_fragment_by_chains(self):
+        """
+        Get fragments from chains from given structure into a list
+        """
+
+        for c in range(len(self.mol_ref[self.model_number])):
             frag = []
-            chain = original_structure[model_number][c]
+            chain = self.mol_ref[self.model_number][c]
             for r in range(len(chain)):
                 residue = chain[r]
                 # add residue to fragsList
-                frag.append(ConnectedResidues(c, r))
+                frag.append(
+                    ConnectedResidues(chain.name, str(residue.seqid), residue.name)
+                )
                 iscon = False
                 # check if next residue is connected to current one
                 if (r + 1) < len(chain):
@@ -50,20 +78,16 @@ class Pseudoregularize:
                     if len(frag) != 0:
                         self.fragsList.append(frag)
                     frag = []
-        endtime = timer()
-        if self.verbose >= 10:
-            print('Pseudoreg Init Time : {0:.4f}'.format(endtime - start))
-
-    def get_fraglist(self):
-        '''
-        Get the number of fragments made from given structure
-        '''
-        return self.fragsList
+        if len(self.fragsList) != 0:
+            return True
+        else:
+            return False
+        # return self.fragsList
 
     def check_fraglist(self, len_only=True):
-        '''
+        """
         For debugging purposes, print out the length of each fragment
-        '''
+        """
         for x in self.fragsList:
             print(len(x))
             if not len_only:
@@ -86,7 +110,7 @@ class Pseudoregularize:
 
     @staticmethod
     def orthogonal_transformation(target, source, weighted=False):
-        '''
+        """
         Implemented in Clipper->coords.cpp, recoded here as independent code.
         Construct the operator which give the least-squares fit of one set of
         coordinates onto another. The coordinates are stored in an array.
@@ -104,11 +128,11 @@ class Pseudoregularize:
             (default=False)
         Return:
           Rotation (3x3 matrix) and translation (x,y,z vector) operators
-        '''
+        """
         debug = False
         # check size
         if len(target) != len(source):
-            raise ValueError('ortho_transformation: coordinate list size mismatch!')
+            raise ValueError("ortho_transformation: coordinate list size mismatch!")
 
         n = float(len(source))
         src_cen = np.zeros(3)
@@ -156,39 +180,46 @@ class Pseudoregularize:
         tr.vec.fromlist(trans_op)
         return tr
 
-    def regularize_frag(self, mol_work, model_number=0):
-        '''
+    def regularize_frag(self, mol_work, model_number=0, dbscan_cluster=False):
+        """
         Regularize target model against reference model
         Argument:
             mol_work: GEMMI structure, target work model to be regularized
             model_number: model number in structure instance, default: 0, first model
-        '''
+        """
+        if dbscan_cluster:
+            if len(self.frags_cluster) != 0:
+                fraglist = self.frags_cluster
+            else:
+                return False
+        else:
+            fraglist = self.fragsList
         # loop of fragments and regularize
-        for frag in self.fragsList:
+        for frag in fraglist:
             mp1 = []
             mp2 = []
             keys = []
             for CR in frag:
                 # just to make sure the residues in mol_work is also in mol_ref
                 try:
-                    mp1.append(mol_work[model_number][CR.C][CR.R])
+                    mp1.append(mol_work[model_number][CR.C][CR.S][CR.R])
                 except IndexError:
                     continue
-                mp2.append(self.mol_ref[model_number][CR.C][CR.R])
+                mp2.append(self.mol_ref[model_number][CR.C][CR.S][CR.R])
                 # find key atoms coord, use to determine per atom weights
-                if mp2[-1].het_flag == 'A':
-                    atom = mp2[-1].find_atom('CA', '*')
+                if mp2[-1].het_flag == "A":
+                    atom = mp2[-1].find_atom("CA", "*")
                 else:
-                    atom = mp2[-1].find_atom('C1*', '*')
+                    atom = mp2[-1].find_atom("C1*", "*")
                 if atom is None:
                     atom = mp2[-1][0]
                 keys.append(atom.pos)
             if len(mp1) == 0:
                 continue  # skip empty frag list
             if self.verbose >= 10:
-                print(f'Keys len : {len(keys)}')
-                print(f'mp1 len : {len(mp1)}')
-                print(f'mp2 len : {len(mp2)}')
+                print(f"Keys len : {len(keys)}")
+                print(f"mp1 len : {len(mp1)}")
+                print(f"mp2 len : {len(mp2)}")
             # make table of distances by atom
             w0 = []
             w1 = []
@@ -224,7 +255,7 @@ class Pseudoregularize:
                 w2.append(w2tmp)
 
             # end looping through residues
-            # now superpose a list of trimonomer fragments (tri or penta?)
+            # now superpose a list of pentamer fragments (tri or penta?)
             f0 = mp1.copy()
             f1 = mp1.copy()
             f2 = mp1.copy()
@@ -269,32 +300,116 @@ class Pseudoregularize:
                 CR = frag[r]
                 # just to make sure the residues in mol_work is also in mol_ref
                 try:
-                    res = mol_work[model_number][CR.C][CR.R]
+                    res = mol_work[model_number][CR.C][CR.S][CR.R]
                 except IndexError:
                     continue
                 for a in range(len(mp1[r])):
-                    mol_work[model_number][CR.C][CR.R][a].pos = mp1[r][a].pos
+                    mol_work[model_number][CR.C][CR.S][CR.R][a].pos = mp1[r][a].pos
             # new_molwork = np.append(new_molwork, frag_work)
-        # return
+        return True
         # return BioPy_Structure(new_molwork)
+
+    def get_frags_clusters(
+        self,
+        atom_selection: Union[str, list] = "all",
+        dbscan_eps: float = 2.3,
+        attr_name: str = "cluster",
+        outfile_suffix: str = None,
+    ):
+        """
+        Use ccpem_pyutils cluster function to get labels for residues clusters
+
+        Arguments:
+            original_structure: gemmi.Structure
+                input structure as reference for pseudoregularisation
+            atom_selection: Union[str, list], optional
+                atom selection for coordinate retrieval
+                Input a list of atom names or any of the following keywords:
+                    "all": all atoms in the model
+                    "backbone": only model backbone atoms, all atoms for non polymers
+                    "one_per_residue": representative atoms, e.g. CA for amino acids
+                    "centre": central atom of the residue based on atom sequence
+
+        Return:
+            Boolean if succeeds or failed
+
+        """
+        list_ids, list_coords = self.gemmimodelutils.get_coordinates(
+            return_list=True, atom_selection=atom_selection
+        )
+
+        ids_arr = np.array(list_ids)
+        cluster_labels = cluster_coord_features(
+            np.array(list_coords), dbscan_eps=dbscan_eps
+        )
+        for i in range(0, len(cluster_labels)):
+            if cluster_labels[i] == -1:  # group labels -1 to adjacent clusters
+                if i > 0:
+                    cluster_labels[i] = cluster_labels[i - 1]
+                else:
+                    cluster_labels[i] = cluster_labels[i + 1]
+        list_res_ids, list_res_attr = get_residue_attribute(list_ids, cluster_labels)
+        dict_attr = {}
+        for n in range(len(list_res_attr)):
+            dict_attr[list_res_ids[n]] = list_res_attr[n]
+        set_bfactor_attributes(
+            self.gemmimodelutils.structure,
+            dict_attr,
+            skip_non_poly=False,
+            attr_name=attr_name,
+            outfile_suffix=outfile_suffix,
+        )
+        # get unique labels
+        num_clusters = list(dict.fromkeys(cluster_labels))
+        self.frags_cluster = [None] * len(num_clusters)
+        # setting the fragments from cluster labels
+        # print(num_clusters)
+        # clusters = [None] * len(num_clusters)
+        # print(clusters)
+        # put clusters into frags_cluster list
+        print(len(cluster_labels))
+        for i in range(len(num_clusters)):
+            frags = ids_arr[cluster_labels == num_clusters[i]]
+            # print(f"DEBUG: frag_index = {frags}")
+            # frags = [list_ids[j] for j in frag_index]
+            frag_dataclass = self.list_to_dataclass(frags)
+            self.frags_cluster[i] = frag_dataclass
+
+        if len(self.frags_cluster) != 0 and frags[0] != None:
+            return True
+        else:
+            return False
+
+    def list_to_dataclass(self, array_ids: Union[str, np.ndarray] = None):
+        if isinstance(array_ids, str):
+            res_id = array_ids.split("_")
+            return ConnectedResidues(C=str(res_id[1]), S=str(res_id[2]), R=res_id[3])
+        else:
+            frag = []
+            for id in array_ids:
+                res_id = id.split("_")
+                frag.append(
+                    ConnectedResidues(C=str(res_id[1]), S=str(res_id[2]), R=res_id[3])
+                )
+            return frag
 
 
 if __name__ == "__main__":
     from pysheetbend.utils import fileio
 
     # ippdb = "/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent"
-    ippdb = '/home/swh514/Projects/work_and_examples/shiftfield/example4/data/test.pdb'
+    ippdb = "/home/swh514/Projects/work_and_examples/shiftfield/example4/data/test.pdb"
     struct, hetatms = fileio.get_structure(ippdb, keep_waters=True)
     # workpdb = "/home/swh514/Projects/testing_ground/shiftfield_python/testrun/check_FT/test_12Apr/testout_sheetbend1_withorthmat_final.pdb"
-    workpdb = '/home/swh514/Projects/work_and_examples/shiftfield/example4/run6/sheetbend_pdbout_result_sheetbendfinal.pdb'
+    workpdb = "/home/swh514/Projects/work_and_examples/shiftfield/example4/run6/sheetbend_pdbout_result_sheetbendfinal.pdb"
     workstruc, hetatm_w = fileio.get_structure(workpdb, keep_waters=True)
     verbose = 10
     pr = Pseudoregularize(struct, model_number=0, verbose=verbose)
     # pr.check_fraglist()
 
     # test
-    ref_A = struct[0]['A']
-    work_A = workstruc[0]['A'].clone()
+    ref_A = struct[0]["A"]
+    work_A = workstruc[0]["A"].clone()
     start = timer()
     pr.regularize_frag(workstruc, model_number=0)
     end = timer()
@@ -303,13 +418,13 @@ if __name__ == "__main__":
     sumerr = 0
     for i in range(len(work_A)):
         for j in range(len(work_A[i])):
-            err = work_A[i][j].pos.dist(workstruc[0]['A'][i][j].pos)
+            err = work_A[i][j].pos.dist(workstruc[0]["A"][i][j].pos)
             sumerr += err * err
             count += 1
     rmsd = np.sqrt(sumerr / count)
-    print(f'rough RMSD {rmsd:.6f}')
-    print('time for regularisation : {0:.4f}'.format(end - start))
-    workstruc.write_minimal_pdb('test_out_pseudoreg_gemmipy.pdb')
+    print(f"rough RMSD {rmsd:.6f}")
+    print("time for regularisation : {0:.4f}".format(end - start))
+    workstruc.write_minimal_pdb("test_out_pseudoreg_gemmipy.pdb")
 
     # elastic neural network james krieger (2019) Neuroscie Lett 700 22-29
     # doruker et al Proteins 40 (2000)

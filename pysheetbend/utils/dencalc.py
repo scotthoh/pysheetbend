@@ -23,7 +23,7 @@ def calculate_density_with_boxsize(
     dencalc = gemmi.DensityCalculatorE()
     dencalc.d_min = reso
     dencalc.rate = rate
-    struc_copy = structure
+    # struc_copy = structure
     # if origin is not None:
     #    tr = gemmi.Transform(gemmi.Mat33(), gemmi.Vec3(*origin))
     #    struc_copy[0].transform_pos_and_adp(tr)
@@ -39,7 +39,7 @@ def calculate_density_with_boxsize(
     return resample_grid
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
     from pysheetbend.utils import fileio
     import numpy as np
@@ -57,4 +57,4 @@ if __name__ == '__main__':
     calc_map = calculate_density_with_boxsize(
         s, reso, rate=samp_rate, grid_shape=gridinfo.grid_shape
     )
-    fileio.write_map_as_MRC(calc_map, m.grid.unit_cell, outpath='calc_map.mrc')
+    fileio.write_map_as_MRC(calc_map, m.grid.unit_cell, outpath="calc_map.mrc")

@@ -3,8 +3,7 @@ Author: Soon Wen Hoh, Kevin Cowtan
 York Structural Biology Laboratory
 """
 from __future__ import absolute_import, print_function, generators
-
-__version__ = "0.3.4rc"
+from pysheetbend._version import __version__
 
 __all__ = [
     "map_scaling",
@@ -16,3 +15,4 @@ __all__ = [
     "shiftfield_util",
     "shiftfield",
 ]
+__version__ = __version__

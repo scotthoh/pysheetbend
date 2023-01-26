@@ -23,9 +23,9 @@ from pysheetbend.utils import fileio, map_funcs, cell
 
 # @profile
 def main(args):
-    '''
+    """
     Run main
-    '''
+    """
     functionType = map_funcs.functionType(2)
 
     # Set variables from parsed arguments
@@ -33,8 +33,8 @@ def main(args):
     ipmap = args.mapin
     if ippdb is None or ipmap is None:
         raise ArgumentError(
-            'Please provide both --pdbin and --mapin to refine model against '
-            'a map.\n Program terminated...\n'
+            "Please provide both --pdbin and --mapin to refine model against "
+            "a map.\n Program terminated...\n"
         )
         # print(
         #    "Please provide --pdbin and --mapin to refine model against a map.\n"
@@ -82,9 +82,9 @@ def main(args):
         else:
             # need to change this python3 can use , end=''
             raise ArgumentError(
-                'Please specify the resolution of the map '
-                'or resolution by cycle.\n'
-                'Program terminated ...\n'
+                "Please specify the resolution of the map "
+                "or resolution by cycle.\n"
+                "Program terminated ...\n"
             )
     elif res > 0.0:
         if res > resbycyc[-1]:
@@ -166,7 +166,7 @@ def main(args):
     # calculate input map threshold/contour
     # Smapin_t = map_funcs.calculate_map_threshold(fullMap)
     for cycrr in range(0, ncycrr):
-        if pseudoreg != 'no':
+        if pseudoreg != "no":
             print("\nRefine-regularise cycle: {0}\n".format(cycrr + 1))
         else:
             print("\nRefine cycle: {0}\n".format(cycrr + 1))
@@ -238,12 +238,10 @@ def main(args):
             )
             # gridshape = sf_util.GridDimension(downsamp_shape)
             timelog.start("fftplan")
-            fft_obj = sf_util.plan_fft(gridshape, input_dtype=np.float32)
-
+            fft_obj, ifft_obj = sf_util.plan_fft_ifft(
+                gridinfo=gridshape, fft_in_dtype=np.float32, fft_out_dtype=np.complex64
+            )
             timelog.end("fftplan")
-            timelog.start("ifftplan")
-            ifft_obj = sf_util.plan_ifft(gridshape, input_dtype=np.complex64)
-            timelog.end("ifftplan")
             print(f"Downsample shape : {downsamp_shape}")
             print(f"Downsample apix : {downsamp_apix}")
             if verbose >= 1:
@@ -277,10 +275,10 @@ def main(args):
             #    )
             if verbose >= 3:
                 fileio.write_map_as_MRC(
-                    cmap_grid, fullMap.unit_cell, outpath=f'cmapgrid_{cyc+1}.mrc'
+                    cmap_grid, fullMap.unit_cell, outpath=f"cmapgrid_{cyc+1}.mrc"
                 )
                 fileio.write_map_as_MRC(
-                    downsamp_map, fullMap.unit_cell, outpath=f'downsamp_map_{cyc+1}.mrc'
+                    downsamp_map, fullMap.unit_cell, outpath=f"downsamp_map_{cyc+1}.mrc"
                 )
             # cmap = structure.calculate_rho(2.5, downsamp_map)
             timelog.end("MapDensity")
@@ -316,7 +314,7 @@ def main(args):
                 gridshape,
                 lpfilt_pre=True,
                 lpfilt_post=False,
-                refscl=False,
+                refscl=True,
                 randsize=0.1,
                 flag_dust=False,
                 verbose=verbose,
@@ -326,10 +324,10 @@ def main(args):
             if nomask:
                 mmap = np.ma.make_mask_none(downsamp_shape)
             elif ipmask is None:
-                downsamp_mask = map_funcs.make_mask_from_maps(
+                combined_map, downsamp_mask = map_funcs.make_mask_from_maps(
                     [scl_map, scl_cmap],
                     gridshape,
-                    res,
+                    rcyc,
                     lpfilt_pre=True,
                     radcyc=radcyc,
                 )
@@ -349,7 +347,7 @@ def main(args):
                     1.0 / f000,
                     fft_obj,
                     ifft_obj,
-                    grid_info,
+                    gridshape,
                 )
                 mmap = np.ma.make_mask(np.logical_not(downsamp_mask))
             # print(scl_map.dtype)
@@ -372,16 +370,27 @@ def main(args):
             if verbose >= 1:
                 end = timer()
                 print("Diff map calc: {0} s ".format(end - start))
+                temp_ma = np.zeros(gridshape.grid_shape, dtype=np.float32)
+                temp_ma[~mmap] = scl_map[~mmap] + scl_cmap[~mmap]
 
+                fileio.write_map_as_MRC(
+                    temp_ma, fullMap.unit_cell, outpath=f"mmap_{cyc+1}.mrc"
+                )
+                if not nomask:
+                    fileio.write_map_as_MRC(
+                        combined_map,
+                        fullMap.unit_cell,
+                        outpath=f"combinedmap_fltr_{cyc+1}.mrc",
+                    )
             if verbose >= 3:
                 fileio.write_map_as_MRC(
-                    dmap, fullMap.unit_cell, outpath=f'dmap_{cyc+1}.mrc'
+                    dmap, fullMap.unit_cell, outpath=f"dmap_{cyc+1}.mrc"
                 )
                 fileio.write_map_as_MRC(
-                    scl_map, fullMap.unit_cell, outpath=f'scl_map_{cyc+1}.mrc'
+                    scl_map, fullMap.unit_cell, outpath=f"scl_map_{cyc+1}.mrc"
                 )
                 fileio.write_map_as_MRC(
-                    scl_cmap, fullMap.unit_cell, outpath=f'scl_cmap_{cyc+1}.mrc'
+                    scl_cmap, fullMap.unit_cell, outpath=f"scl_cmap_{cyc+1}.mrc"
                 )
 
             # if verbose >= 0:
@@ -452,8 +461,7 @@ def main(args):
                     mmap,
                     radcyc,
                     fltr,
-                    ori0,
-                    downsamp_apix,
+                    gridshape,
                     fft_obj,
                     ifft_obj,
                     cyc + 1,
@@ -463,22 +471,22 @@ def main(args):
 
                 # Use gemmi interpolate and update positions
                 # convert numpy array to FloatGrid first for x1m, x2m, x3m
-                timelog.start('Nympy2Grid')
+                timelog.start("Nympy2Grid")
                 grid_dx = map_funcs.numpy_to_gemmi_grid(
-                    x1m, fullMap.unit_cell, spacegroup='P1'
+                    x1m, fullMap.unit_cell, spacegroup="P1"
                 )
                 grid_dy = map_funcs.numpy_to_gemmi_grid(
-                    x2m, fullMap.unit_cell, spacegroup='P1'
+                    x2m, fullMap.unit_cell, spacegroup="P1"
                 )
                 grid_dz = map_funcs.numpy_to_gemmi_grid(
-                    x3m, fullMap.unit_cell, spacegroup='P1'
+                    x3m, fullMap.unit_cell, spacegroup="P1"
                 )
-                timelog.end('Numpy2Grid')
-                timelog.start('UpdateModel')
+                timelog.end("Numpy2Grid")
+                timelog.start("UpdateModel")
                 map_funcs.update_atoms_position(
-                    grid_dx, grid_dy, grid_dz, structure, mode='tricubic'
+                    grid_dx, grid_dy, grid_dz, structure, mode="tricubic"
                 )
-                timelog.end('UpdateModel')
+                timelog.end("UpdateModel")
 
             # run pseudo-regularisation end of every shift-field iteration
             # not recommended as the convergence rate is slower
@@ -502,7 +510,7 @@ def main(args):
                         outname = "{0}_intermediate_{1}_pre_refuiso.pdb".format(
                             pathfname, cyc + 1
                         )
-                structure.write_minimal_pdb(f'{outname}')
+                structure.write_minimal_pdb(f"{outname}")
                 timelog.start("UISO")
                 x1m = shift_field_uiso(
                     scl_cmap,
@@ -517,20 +525,20 @@ def main(args):
                     (fullMap.unit_cell.a, fullMap.unit_cell.b, fullMap.unit_cell.c),
                 )
                 timelog.end("UISO")
-                timelog.start('Numpy2Grid')
+                timelog.start("Numpy2Grid")
                 grid_du = map_funcs.numpy_to_gemmi_grid(
-                    x1m, fullMap.unit_cell, spacegroup='P1'
+                    x1m, fullMap.unit_cell, spacegroup="P1"
                 )
-                timelog.end('Numpy2Grid')
-                timelog.start('UpdateModel')
+                timelog.end("Numpy2Grid")
+                timelog.start("UpdateModel")
                 map_funcs.update_uiso_values(
                     grid_du,
                     structure,
                     biso_range,
-                    mode='tricubic',
+                    mode="tricubic",
                     verbose=verbose,
                 )
-                timelog.end('UpdateModel')
+                timelog.end("UpdateModel")
 
             # Save results for every iteration
             temp_result = sf_util.ResultsByCycle(
@@ -552,7 +560,7 @@ def main(args):
                     )
                 else:
                     outname = "{0}_intermediate_{1}.pdb".format(pathfname, cyc + 1)
-                structure.write_minimal_pdb(f'{outname}')
+                structure.write_minimal_pdb(f"{outname}")
             # write out shifts
             # if len(shift_vars) != 0 and verbose >= 3:
             #    outcsv = "shiftvars1_linalg_{0}.csv".format(cyc + 1)
@@ -566,14 +574,14 @@ def main(args):
             # print("[ Top 10 ]")
             # for stat in top_stats[:10]:
             #    print(stat)
-            '''
+            """
             if len(shift_u) != 0 and verbose >= 2:
                 outusiocsv = "shiftuiso_u2b_{0}.csv".format(cyc + 1)
                 fuiso = open(outusiocsv, "w")
                 for j in range(0, len(shift_u)):
                     fuiso.write("{0}, {1}\n".format(j, shift_u[j]))
                 fuiso.close()
-            '''
+            """
             # end of cycle loop
         if pseudoreg == "postref":
             timelog.start("PseudoReg")
@@ -614,14 +622,14 @@ def main(args):
                 fileio.write_map_as_MRC(
                     grid_data=scl_cmap,
                     unitcell=fullMap.unit_cell.parameters,
-                    spacegroup='P1',
-                    outpath='final_scl_cmap.mrc',
+                    spacegroup="P1",
+                    outpath="final_scl_cmap.mrc",
                 )
                 fileio.write_map_as_MRC(
                     grid_data=scl_map,
                     unitcell=fullMap.unit_cell.parameters,
-                    spacegroup='P1',
-                    outpath='final_scl_map.mrc',
+                    spacegroup="P1",
+                    outpath="final_scl_map.mrc",
                 )
             mapin_t = map_funcs.calculate_map_threshold(scl_map)
             cmap_t = map_funcs.calculate_map_threshold(scl_cmap)
@@ -642,7 +650,7 @@ def main(args):
             print(m)
         # end of psedo reg loop
         # write final pdb for each pseudo reg loop
-        outfname = ''
+        outfname = ""
         if oppdb is not None:
             pathfname = splitext(oppdb)[0]
             if ncycrr > 1:
@@ -658,7 +666,7 @@ def main(args):
             else:
                 outfname = "{0}_refined.pdb".format(pathfname)
             # structure.write_to_PDB(f"{outfname}", hetatom=hetatm_present)
-        structure.write_minimal_pdb(f'{outfname}')
+        structure.write_minimal_pdb(f"{outfname}")
 
     # write xml results
     if xmlout is not None:
