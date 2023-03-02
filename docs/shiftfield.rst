@@ -68,11 +68,8 @@ Keyworded input:
 * ``--radius-scale`` Set the radius in proportion to the resolution for the current cycle. The resolution is multiplied by this factor to get the radius. Overidden by radius.
 * ``--coord`` Performs coordinate refinement. If not refinement option is specified, coordinate refinement is enabled by default.
 * ``--uiso`` Performs B-factor refinement.
-* ``--pseudo-regularise`` Pseudo-regularise the model. Default = postref.
-                          no: turn off pseudo-regularise.
-                          yes: run at the end of every cycle.
-                          postref: run only at the end of every macro cycle.
-* ``--b-iso-range`` Set the lower and upper bound of B-isotropic value refinement. Separated by space
+* ``--pseudo-regularise`` Pseudo-regularise the model. Default = postref. **no**: turn off pseudo-regularise. **yes**: run at the end of every cycle. **postref**: run only at the end of every macro cycle.
+* ``--b-iso-range`` Set the lower and upper bound of B-isotropic value refinement. Separated by space.
 
 **Miscellaneous**
-* ``--verbose`` Set verbosity of the terminal output
+* ``--verbose`` Set verbosity of the terminal output.
