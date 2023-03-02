@@ -72,4 +72,5 @@ Keyworded input:
 * ``--b-iso-range`` Set the lower and upper bound of B-isotropic value refinement. Separated by space.
 
 **Miscellaneous**
+
 * ``--verbose`` Set verbosity of the terminal output.
