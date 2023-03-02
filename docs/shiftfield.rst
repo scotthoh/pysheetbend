@@ -68,7 +68,7 @@ Keyworded input:
 * ``--radius-scale`` Set the radius in proportion to the resolution for the current cycle. The resolution is multiplied by this factor to get the radius. Overidden by radius.
 * ``--coord`` Performs coordinate refinement. If not refinement option is specified, coordinate refinement is enabled by default.
 * ``--uiso`` Performs B-factor refinement.
-* ``--pseudo-regularise`` Pseudo-regularise the model. Default = postref. \
+* ``--pseudo-regularise`` Pseudo-regularise the model. Default = postref.
                           no: turn off pseudo-regularise.
                           yes: run at the end of every cycle.
                           postref: run only at the end of every macro cycle.
