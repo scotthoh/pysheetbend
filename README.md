@@ -11,7 +11,7 @@ to correcting large shifts in secondary structure elements in molecular replacem
 A structure file (PDB/mmCIF) and a map are required. The parameters in the structure file will be updated to better match the observations.
 The performance of the calculation is controlled by two parameters, the resolution and the radius. For details, see:-
 
-Cowtan, K., & Agirre, J. (2018) *Acta Cryst. D*\ **74**, 125-131. doi: `10.1107/S2059798320013170 <https://doi.org/10.1107/S2059798320013170>`_
+Cowtan, K., & Agirre, J. (2018) *Acta Cryst. D***74**, 125-131. doi: [10.1107/S2059798320013170](https://doi.org/10.1107/S2059798320013170)
 
 For coordinate refinement, the calculation would normally start at a low resolution (e.g. >=6 Angstroms) and then increase to 3 or 4 Angstroms before moving to regular refinement.
 B-value refinement may be usefully performed at higher resolutions, depending on the speed and fit required. The resolutions may be set for the whole calculation, or a list of resolutions may be provided describing how the resolution will change over multiple macro cycles.
