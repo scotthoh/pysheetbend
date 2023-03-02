@@ -181,19 +181,29 @@ class Pseudoregularize:
         return tr
 
     def regularize_frag(self, mol_work, model_number=0, dbscan_cluster=False):
+        if dbscan_cluster:
+            return self.regularize_frag_1(
+                mol_work=mol_work,
+                model_number=model_number,
+                dbscan_cluster=dbscan_cluster,
+            )
+        else:
+            return self.regularize_frag_0(mol_work=mol_work, model_number=model_number)
+
+    def regularize_frag_0(self, mol_work, model_number=0):
         """
         Regularize target model against reference model
         Argument:
             mol_work: GEMMI structure, target work model to be regularized
             model_number: model number in structure instance, default: 0, first model
         """
-        if dbscan_cluster:
-            if len(self.frags_cluster) != 0:
-                fraglist = self.frags_cluster
-            else:
-                return False
-        else:
-            fraglist = self.fragsList
+        # if dbscan_cluster:
+        #    if len(self.frags_cluster) != 0:
+        #        fraglist = self.frags_cluster
+        #    else:
+        #        return False
+        # else:
+        fraglist = self.fragsList
         # loop of fragments and regularize
         for frag in fraglist:
             mp1 = []
@@ -304,10 +314,78 @@ class Pseudoregularize:
                 except IndexError:
                     continue
                 for a in range(len(mp1[r])):
-                    mol_work[model_number][CR.C][CR.S][CR.R][a].pos = mp1[r][a].pos
+                    res[a].pos = mp1[r][a].pos
+                    # mol_work[model_number][CR.C][CR.S][CR.R][a].pos = mp1[r][a].pos
             # new_molwork = np.append(new_molwork, frag_work)
         return True
-        # return BioPy_Structure(new_molwork)
+
+    def regularize_frag_1(self, mol_work, model_number=0, dbscan_cluster=False):
+        # loop of fragments and regularize
+        # weight using a spherical distance weight
+        if len(self.frags_cluster) != 0:
+            fraglist = self.frags_cluster
+        else:
+            fraglist = self.fragsList
+        for frag in fraglist:
+            mp1 = []
+            mp2 = []
+            keys = []
+            for CR in frag:
+                # just to make sure the residues in mol_work is also in mol_ref
+                try:
+                    mp1.append(mol_work[model_number][CR.C][CR.S][CR.R])
+                except IndexError:
+                    continue
+                mp2.append(self.mol_ref[model_number][CR.C][CR.S][CR.R])
+                # find key atoms coord, use to determine per atom weights
+                if mp2[-1].het_flag == "A":
+                    atom = mp2[-1].find_atom("CA", "*")
+                else:
+                    atom = mp2[-1].find_atom("C1*", "*")
+                if atom is None:
+                    atom = mp2[-1][0]
+                keys.append(atom.pos)
+                # continue from here 1 Feb
+            w0 = []
+            mid_r = len(keys) // 2
+            rn = abs(keys[mid_r].dist(keys[-1]))
+            r0 = abs(keys[mid_r].dist(keys[0]))
+            max_radius = max(r0, rn) + 5.0
+
+            for r in range(len(mp2)):
+                w0tmp = []
+                for atom in mp2[r]:
+                    dr = atom.pos.dist(keys[mid_r])
+                    w00 = pow(1.0 - dr / max_radius, 2)
+                    w0tmp.append(w00)
+                w0.append(w0tmp)
+            f0 = mp1.copy()
+            co1 = []
+            co2 = []
+            for r in range(len(mp2)):
+                for a in range(len(mp1[r])):
+                    co1.append(mp1[r][a].pos)  # .tolist())
+                    co2.append(mp2[r][a].pos)  # .tolist())
+                # transform = Pseudoregularize.orthogonal_transformation(co1, co2)
+                superpose = gemmi.superpose_positions(co1, co2)
+                transform = superpose.transform
+                # rebuild
+                for a in range(len(mp2[r])):
+                    f0[r][a].pos = gemmi.Position(transform.apply(mp2[r][a].pos))
+            for r in range(len(mp1)):
+                for a in range(len(mp1[r])):
+                    mp1[r][a].pos = w0[r][a] * f0[r][a].pos
+            for r in range(len(frag)):
+                CR = frag[r]
+                # just to make sure the residues in mol_work is also in mol_ref
+                try:
+                    res = mol_work[model_number][CR.C][CR.S][CR.R]
+                except IndexError:
+                    continue
+                for a in range(len(mp1[r])):
+                    res[a].pos = mp1[r][a].pos
+                    # mol_work[model_number][CR.C][CR.S][CR.R][a].pos = mp1[r][a].pos
+        return True
 
     def get_frags_clusters(
         self,
@@ -375,7 +453,7 @@ class Pseudoregularize:
             frag_dataclass = self.list_to_dataclass(frags)
             self.frags_cluster[i] = frag_dataclass
 
-        if len(self.frags_cluster) != 0 and frags[0] != None:
+        if len(self.frags_cluster) != 0 and frags[0] is not None:
             return True
         else:
             return False
@@ -397,11 +475,9 @@ class Pseudoregularize:
 if __name__ == "__main__":
     from pysheetbend.utils import fileio
 
-    # ippdb = "/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1.ent"
     ippdb = "/home/swh514/Projects/work_and_examples/shiftfield/example4/data/test.pdb"
     struct, hetatms = fileio.get_structure(ippdb, keep_waters=True)
-    # workpdb = "/home/swh514/Projects/testing_ground/shiftfield_python/testrun/check_FT/test_12Apr/testout_sheetbend1_withorthmat_final.pdb"
-    workpdb = "/home/swh514/Projects/work_and_examples/shiftfield/example4/run6/sheetbend_pdbout_result_sheetbendfinal.pdb"
+    workpdb = "/home/swh514/Projects/work_and_examples/shiftfield/example4/run6/sheetbend_pdbout_result_sheetbendfinal.pdb"  # noqa E501
     workstruc, hetatm_w = fileio.get_structure(workpdb, keep_waters=True)
     verbose = 10
     pr = Pseudoregularize(struct, model_number=0, verbose=verbose)

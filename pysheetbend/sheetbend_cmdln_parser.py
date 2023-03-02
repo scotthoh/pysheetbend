@@ -23,7 +23,7 @@ class SheetbendParser:
         Parse input arguments
         """
         # parser = argparse.ArgumentParser()
-        parser.prog = "PySheetbendEM"
+        parser.prog = "pysheetbend"
         parser.description = """Shift-field refinement of macromolecular
         atomic models for cryo-EM data."""
         # parser = parser.add_parsers(dest="command")
@@ -63,20 +63,20 @@ class SheetbendParser:
         )
 
         infiles.add_argument(
-            '-no_ligands',
-            '--no_ligands',
+            "-no_ligands",
+            "--no_ligands",
             action="store_true",
-            dest='no_ligands',
-            help='Remove ligands.',
+            dest="no_ligands",
+            help="Remove ligands.",
             required=False,
         )
 
         infiles.add_argument(
-            '-no_h2o',
-            '--no_waters',
+            "-no_h2o",
+            "--no_waters",
             action="store_true",
-            dest='no_water',
-            help='Remove water.',
+            dest="no_water",
+            help="Remove water.",
             required=False,
         )
 
@@ -100,15 +100,6 @@ class SheetbendParser:
         )
 
         outfiles = parser.add_argument_group("Output Files")
-        # outfiles.add_argument(
-        #    "--mapout",
-        #    type=str,
-        #    dest="mapout",
-        #    help="Output map filename",
-        #    metavar="Output_map",
-        #    default="sheetbend_mapout_result.map",
-        #    required=False,
-        # )
 
         outfiles.add_argument(
             "--pdbout",
@@ -116,7 +107,7 @@ class SheetbendParser:
             dest="pdbout",
             help="Output model filename.",
             metavar="Output_PBD",
-            default="shiftfield.pdb",
+            default=None,
             required=False,
         )
 
@@ -172,8 +163,7 @@ class SheetbendParser:
                 "the program will run at this resolution only."
             ),
             metavar="Resolution",
-            default=-1.0,
-            required=False,
+            required=True,
         )
 
         ref.add_argument(
@@ -286,11 +276,14 @@ class SheetbendParser:
         )
 
         ref.add_argument(
-            "--no-hetatom",
-            action="store_false",
-            dest="hetatom",
+            "-sel",
+            "--selection",
+            dest="selection",
+            type=str,
+            nargs="*",
             help=(
-                "Exclude hetatoms for refinement if present in file." "(Default = True)"
+                "Selected parts of the model will be refined."
+                "Use Gemmi's selection syntax."
             ),
             required=False,
         )
@@ -308,12 +301,12 @@ class SheetbendParser:
             choices=["no", "yes", "postref"],
             dest="pseudoreg",
             help=(
-                "Pseudo-regularise the model. (Default = no)"
+                "Pseudo-regularise the model. (Default = postref)"
                 "no: turn off pseudo-regularise,"
                 "yes: run at the end of the every cycle."
                 "postref: run only at the very end of refinement."
             ),
-            default="no",
+            default="postref",
             required=False,
         )
 

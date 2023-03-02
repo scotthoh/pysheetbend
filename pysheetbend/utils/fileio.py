@@ -67,6 +67,7 @@ def get_structure(
                 break
     if verbose > 1:
         print(f"{structure}")
+        print(f"HETATM present: {hetatm_present}")
 
     return structure, hetatm_present
 

@@ -9,9 +9,8 @@ License: GNU LESSER GENERAL PUBLIC LICENSE v2.1
 from __future__ import print_function, absolute_import
 from argparse import ArgumentError
 import sys
-from os.path import splitext
 from os import getcwd
-from timeit import default_timer as timer
+from os.path import splitext, basename
 import gemmi
 import numpy as np
 from pysheetbend.utils.dencalc import calculate_density_with_boxsize, calculate_density
@@ -22,12 +21,12 @@ from pysheetbend.utils import fileio, map_funcs, cell
 
 # from memory_profiler import profile
 
+
 # @profile
 def main(args):
     """
     Run main
     """
-    functionType = "quadratic"
 
     # Set variables from parsed arguments
     ippdb = args.pdbin
@@ -37,15 +36,11 @@ def main(args):
             "Please provide both --pdbin and --mapin to refine model against "
             "a map.\n Program terminated...\n"
         )
-        # print(
-        #    "Please provide --pdbin and --mapin to refine model against a map.\n"
-        #    "Program terminated...\n"
-        # )
 
     nomask = args.nomask
     ipmask = args.maskin
-    oppdb = args.pdbout  # sheetbend_pdbout_result.pdb
-    res = args.res  # -1.0
+    oppdb = args.pdbout  # shiftfield.pdb
+    res = args.res
     resbycyc = args.res_by_cyc  # None
     ncyc = args.cycle  # 1
     refxyz = args.refxyz  # False
@@ -55,26 +50,23 @@ def main(args):
     rad = args.rad  # -1.0
     radscl = args.radscl  # 4.0
     coor_tol = args.coor_tol  # 0.01
-    xmlout = args.xmlout  # program.xml
     output_intermediate = args.intermediate  # False
     verbose = args.verbose  # 0
     ncycrr = args.cycle_regularise  # refine-regularise-cycle, macro cycles
-    fltr = 2  # quadratic filter
-    hetatom = args.hetatom  # True by default
+    function_type = "quadratic"  # quadratic function filter
     hetatm_present = False  # for file writeout in case no hetatm present
     biso_range = args.biso_range
-    remove_ligand = args.no_ligands
-    remove_water = args.no_water
-    # ulo = sf_util.b2u(biso_range[0])
-    # uhi = sf_util.b2u(biso_range[1])
-    # need to make Profile singleton
-    bfac_tol = 1.0
+    keep_ligand = not args.no_ligands
+    keep_water = not args.no_water
+    selection = args.selection
+    alternative_clustering = False
+    # for profiling, if verbose >= 2, writes out time
+    # for each profiled section at the end
     timelog = sf_util.Profile()
-    # defaults
-    # if res <= 0.0:
-    #    print('Please specify the resolution of the map!')
-    #    exit()
-
+    pdbin_ext = None
+    offset_origin = [0.0, 0.0, 0.0]
+    # job_location = getcwd()
+    # if both --coord and --usio are not specified
     if not refxyz and not refuiso:
         refxyz = True
         print("Setting --coord to True for coordinates refinement.")
@@ -96,16 +88,23 @@ def main(args):
     if refuiso:
         print(f"B-factor bounds : {biso_range[0]} < B < {biso_range[1]}")
     if oppdb is not None:
-        pathfname = splitext(oppdb)[0]
+        pathfname = oppdb  # user specified file
+        pdbin_ext = splitext(basename(ippdb))[1]
+
     else:
-        pathfname = splitext(ippdb)[0]
+        pathfname = splitext(basename(ippdb))[0]
+        pdbin_ext = splitext(basename(ippdb))[1]
+
     # initialise results list, will contain all results
     results = []
     # read map
     mapin, grid_info = fileio.read_map(ipmap)
     # read model
     structure, hetatm_present = fileio.get_structure(
-        ippdb, keep_waters=~remove_water, keep_hetatom=~remove_ligand, verbose=verbose
+        ippdb,
+        keep_waters=keep_water,
+        keep_hetatom=keep_ligand,
+        verbose=verbose,
     )
     # check if map is cubic, make cubic map
     if (
@@ -117,7 +116,7 @@ def main(args):
     fullMap = mapin.grid
     # TODO: check map box size and reduce if too big?
     apix0 = grid_info.voxel_size
-    ori0 = grid_info.grid_start
+    ori0 = grid_info.origin
 
     # set unit cell from map to structure if (1.0 1.0 1.0)
     if not structure.cell.is_crystal():
@@ -128,10 +127,15 @@ def main(args):
     # if origin not 0,0,0, offset structure in advance
     # and keep the offset
     if np.any(grid_info.origin):  # not zero
-        tr = gemmi.Transform(gemmi.Mat33(), gemmi.Vec3(*-grid_info.origin))
+        print("Fix origin")
+        offset_origin = grid_info.origin
+        tr = gemmi.Transform(gemmi.Mat33(), gemmi.Vec3(*-offset_origin))
         structure[0].transform_pos_and_adp(tr)
         grid_info.origin = np.array([0.0, 0.0, 0.0])
-
+        structure.write_minimal_pdb("starting_input_originat0.pdb")
+    # flag selections
+    if selection:
+        sf_util.mark_selected_residues(structure, selection)
     nyquist_res = np.amax(2.0 * apix0)
     min_d = np.amax(apix0)
     if res > 0.0 and res > nyquist_res:
@@ -141,25 +145,28 @@ def main(args):
         res = 3.0 * min_d
 
     if pseudoreg != "no":
-        print("Setting model for Pseudoregularization")
+        print(f"Setting model for Pseudoregularization: {pseudoreg}")
         preg = pseudoregularizer.Pseudoregularize(structure.clone())
 
     # read in mask if provided as input
     if ipmask is not None:
         maskin, maskin_grid_info = fileio.read_map(ipmask)
-    # calculate model map density
-    timelog.start("MapDensity")
-    cmap_grid = calculate_density(
-        structure=structure,
-        reso=res,
-        rate=1.5,
+    fft_obj0, ifft_obj0 = sf_util.plan_fft_ifft(
+        gridinfo=grid_info, fft_in_dtype=np.float32, fft_out_dtype=np.complex64
     )
-    timelog.end("MapDensity")
     # mask
     timelog.start("MakeMask")
     if nomask:
         mmap = np.ma.make_mask_none(grid_info.grid_shape)
     elif ipmask is None:
+        # calculate model map density
+        timelog.start("MapDensity")
+        cmap_grid = calculate_density(
+            structure=structure,
+            reso=res,
+            rate=1.5,
+        )
+        timelog.end("MapDensity")
         mask_map, mask_grid = map_funcs.make_mask_from_maps(
             [fullMap, cmap_grid],
             grid_info,
@@ -177,9 +184,15 @@ def main(args):
         #        temp_ma, fullMap.unit_cell, outpath=f"calculated_mask.mrc"
         #    )
     else:
-        mask_map = map_funcs.resample_data_by_boxsize(maskin.grid, grid_info.grid_shape)
+        mask_map = map_funcs.lowpass_map(
+            maskin.grid,
+            grid_info.voxel_size[0] / res,
+            fftobj=fft_obj0,
+            ifftobj=ifft_obj0,
+        )
+        mask_map = map_funcs.resample_data_by_boxsize(mask_map, grid_info.grid_shape)
         filt_data_r, f000 = map_funcs.make_filter_edge_centered(
-            grid_info.grid_shape, filter_radius=30.0, function=functionType
+            grid_info.grid_shape, filter_radius=30.0, function=function_type
         )
         mask_map = map_funcs.fft_convolution_filter(
             mask_map, filt_data_r, 1.0 / f000, grid_info.grid_shape
@@ -189,24 +202,12 @@ def main(args):
     print(f"mmap size {mmap.size}, non zero {np.count_nonzero(mmap)}")
     timelog.end("MakeMask")
     if verbose >= 5:
-        fileio.write_mask_as_MRC(
-            mmap, fullMap.unit_cell, outpath=f"calculated_mask.mrc"
-        )
-
-        # TODO:reposition this part
-        # fileio.write_map_as_MRC(
-        #    dmap, fullMap.unit_cell, outpath=f"dmap_{rcyc+1}_{cyc}.mrc"
-        # )
-        # fileio.write_map_as_MRC(
-        #    scl_map, fullMap.unit_cell, outpath=f"scl_map_{rcyc+1}_{cyc}.mrc"
-        # )
-        # fileio.write_map_as_MRC(
-        #    scl_cmap, fullMap.unit_cell, outpath=f"scl_cmap_{rcyc+1}_{cyc}.mrc"
-        # )
+        fileio.write_mask_as_MRC(mmap, fullMap.unit_cell, outpath="calculated_mask.mrc")
 
     # CASE 1: Refine model against EM data
     print("\nRefine model against EM map")
     res_list = (np.linspace(res, resbycyc[0], int(ncycrr)))[::-1]
+    # less fragment at low res
     eps_list = np.linspace(5.2, 5.45, int(ncycrr))[::-1]
     # eps_list = np.linspace(3.7, 4.0, int(ncycrr))
 
@@ -219,20 +220,14 @@ def main(args):
                     resolution
                 )
             )
-            if resolution >= 4.5:
+            if resolution >= 4.5 and alternative_clustering:
                 preg.get_frags_clusters(
-                    atom_selection="centre",
+                    atom_selection="centre",  # "one_per_residue"
                     dbscan_eps=eps_list[rcyc],
                     attr_name=f"cluster_rescyc{str(rcyc)}",
-                    outfile_suffix="testrun",
+                    outfile_suffix=splitext(basename(ippdb))[0],
                 )
-                # preg.get_frags_clusters(
-                #    atom_selection="one_per_residue",
-                #    dbscan_eps=eps_list[rcyc],
-                #    attr_name=f"cluster_rescyc{str(rcyc)}",
-                #    outfile_suffix="testrun",
-                # )
-                dbscan_cluster = True
+                dbscan_cluster = True  # False
             else:
                 dbscan_cluster = False
         else:
@@ -241,7 +236,7 @@ def main(args):
         # set radius if not user specified
         radcyc = rad
         if radcyc <= 0.0:
-            if resolution < 6.0 and radscl >= 5.0:
+            if resolution < 6.0 and (radscl >= 5.0 or radscl < 4.0):
                 radscl = 4.5
             radcyc = radscl * resolution
         print("\n Cycle: {0}   Radius: {1}\n".format(rcyc + 1, radcyc))
@@ -252,46 +247,13 @@ def main(args):
         # faster overall; but should be able to optimize more by calculating
         # better gridshapes.
         # don't have to use lowpass for now
+        # 17 Feb - should low pass filter before resample to
+        # remove artifact of high reso
         spacing = resolution / (2 * samp_rate)
         downsamp_shape, downsamp_apix = sf_util.calc_best_grid_apix(
             spacing,
             (fullMap.unit_cell.a, fullMap.unit_cell.b, fullMap.unit_cell.c),
         )
-
-        timelog.start("Resample")
-        downsamp_map = map_funcs.resample_data_by_boxsize(fullMap, downsamp_shape)
-        timelog.end("Resample")
-        downsamp_shape = downsamp_map.shape
-        downsamp_apix = map_funcs.calculate_pixel_size(
-            fullMap.unit_cell, downsamp_shape
-        )
-        # resample calculate model map density to match downsamp_map grid shape
-        timelog.start("Resample")
-        cmap_grid = map_funcs.resample_data_by_boxsize(cmap_grid, downsamp_shape)
-        # resample the mask
-        # mmap_downsamp = np.ma.resize(mmap, downsamp_shape)
-        # mmap_downsamp = map_funcs.downsample_mask(mmap.astype(int), downsamp_shape)
-        if nomask:
-            mmap_downsamp = np.ma.make_mask_none(downsamp_shape)
-        elif not np.all(grid_info.grid_shape == downsamp_shape):
-            combinedmap_downsamp = map_funcs.resample_data_by_boxsize(
-                mask_map, downsamp_shape
-            )
-            print(
-                f"{combinedmap_downsamp.min()}, {combinedmap_downsamp.max()}, {combinedmap_downsamp.mean()}, {combinedmap_downsamp.std()}"
-            )
-            mmap_downsamp = np.ma.masked_less(
-                combinedmap_downsamp, combinedmap_downsamp.mean()
-            ).mask
-        else:
-            mmap_downsamp = mmap
-        print(
-            f"DEBUG:mmap size {mmap_downsamp.size}, non zero {np.count_nonzero(mmap_downsamp)}"
-        )
-        timelog.end("Resample")
-
-        # downsamp_apix = downsamp_map.apix
-        # need to update this for mask if true
         gridshape = cell.GridInfo(
             downsamp_shape,
             grid_info.grid_start,
@@ -308,6 +270,68 @@ def main(args):
             gridinfo=gridshape, fft_in_dtype=np.float32, fft_out_dtype=np.complex64
         )
         timelog.end("FFTPlan")
+        timelog.start("Resample")
+
+        downsamp_map = map_funcs.lowpass_map(
+            fullMap,
+            cutoff=grid_info.voxel_size[0] / resolution,
+            fftobj=fft_obj0,
+            ifftobj=ifft_obj0,
+        )
+        downsamp_map = map_funcs.resample_data_by_boxsize(downsamp_map, downsamp_shape)
+        timelog.end("Resample")
+        # resample calculate model map density to match downsamp_map grid shape
+        cmap_grid = calculate_density(
+            structure=structure, reso=resolution, rate=samp_rate
+        )
+        lp_cutoff = (structure.cell.parameters[0] / cmap_grid.shape[0]) / resolution
+        cmap_grid, cmap_fftobj, cmap_ifftobj = map_funcs.lowpass_map(
+            cmap_grid,
+            cutoff=lp_cutoff,
+            grid_shape=cmap_grid.shape,
+            grid_reci=np.array(
+                [cmap_grid.shape[0], cmap_grid.shape[1], cmap_grid.shape[2] // 2 + 1]
+            ),
+            return_fftobj=True,
+        )
+        cmap_grid = map_funcs.resample_data_by_boxsize(cmap_grid, downsamp_shape)
+        # cmap_grid = calculate_density_with_boxsize(
+        #    structure=structure,
+        #    reso=resolution,
+        #    rate=samp_rate,
+        #    grid_shape=downsamp_shape,
+        # )
+        timelog.end("MapDensity")
+        timelog.start("Resample")
+        # cmap_grid = map_funcs.lowpass_map(cmap_grid, cutoff=grid_info.voxel_size[0]/resolution, gridinfo=grid_info) # noqa=E501
+        # cmap_grid = map_funcs.resample_data_by_boxsize(cmap_grid, downsamp_shape)
+        # resample the mask
+        # mmap_downsamp = np.ma.resize(mmap, downsamp_shape)
+        # mmap_downsamp = map_funcs.downsample_mask(mmap.astype(int), downsamp_shape)
+        if nomask:
+            mmap_downsamp = np.ma.make_mask_none(downsamp_shape)
+        elif not np.all(grid_info.grid_shape == downsamp_shape):
+            combinedmap_downsamp = map_funcs.resample_data_by_boxsize(
+                mask_map, downsamp_shape
+            )
+            print(
+                f"{combinedmap_downsamp.min()}, {combinedmap_downsamp.max()}, "
+                f"{combinedmap_downsamp.mean()}, {combinedmap_downsamp.std()}"
+            )
+            mmap_downsamp = np.ma.masked_less(
+                combinedmap_downsamp, combinedmap_downsamp.mean()
+            ).mask
+        else:
+            mmap_downsamp = mmap
+        if verbose >= 5:
+            print(
+                f"DEBUG:mmap size {mmap_downsamp.size}, "
+                f"non zero {np.count_nonzero(mmap_downsamp)}"
+            )
+        timelog.end("Resample")
+
+        # downsamp_apix = downsamp_map.apix
+        # need to update this for mask if true
 
         if verbose >= 5:
             fileio.write_map_as_MRC(
@@ -334,35 +358,38 @@ def main(args):
         # refsc > dust,refsc=False > refsc, dust > dust
         # in terms of model better to worst # recheck
         # dust,refsc=False > refsc > dust > refsc, dust
-        timelog.start("DiffMap")
-        scl_map, scl_cmap, dmap = map_funcs.calc_diffmap(
-            downsamp_map,
-            cmap_grid,
-            resolution,
-            resolution,
-            gridshape,
-            gridshape,
-            lpfilt_pre=True,
-            lpfilt_post=False,
-            refscl=True,
-            randsize=0.1,
-            flag_dust=False,
-            verbose=verbose,
-            fft_obj=fft_obj,
-            ifft_obj=ifft_obj,
-        )
-        timelog.end("DiffMap")
-        if verbose >= 4:
-            fileio.write_map_as_MRC(
-                scl_map, fullMap.unit_cell, outpath=f"scl_mapin_{rcyc+1}.mrc"
+        if refxyz:
+            timelog.start("DiffMap")
+            scl_map, scl_cmap, dmap = map_funcs.calc_diffmap(
+                downsamp_map,
+                cmap_grid,
+                resolution,
+                resolution,
+                gridshape,
+                gridshape,
+                lpfilt_pre=False,
+                lpfilt_post=False,
+                refscl=True,
+                randsize=0.1,
+                flag_dust=False,
+                verbose=verbose,
+                fft_obj=fft_obj,
+                ifft_obj=ifft_obj,
             )
-            fileio.write_map_as_MRC(
-                scl_cmap, fullMap.unit_cell, outpath=f"scl_cmap_{rcyc+1}.mrc"
-            )
+            timelog.end("DiffMap")
+            if verbose >= 4:
+                fileio.write_map_as_MRC(
+                    scl_map, fullMap.unit_cell, outpath=f"scl_mapin_{rcyc+1}.mrc"
+                )
+                fileio.write_map_as_MRC(
+                    scl_cmap, fullMap.unit_cell, outpath=f"scl_cmap_{rcyc+1}.mrc"
+                )
         converge = False
         cyc = 1  # internal cycle index
+        diffmap_lpfilter = True
         while not converge:
-            model_current = structure[0].clone()  # for RMSD calculation at the end
+            # for RMSD calculation at the end
+            model_current = structure[0].clone()
 
             if refxyz:
                 print(" REFINE XYZ")
@@ -372,7 +399,7 @@ def main(args):
                     dmap,
                     mmap_downsamp,
                     radcyc,
-                    fltr,
+                    function_type,
                     gridshape,
                     fft_obj,
                     ifft_obj,
@@ -397,14 +424,19 @@ def main(args):
                 timelog.end("Numpy2Grid")
                 timelog.start("UpdateModel")
                 map_funcs.update_atoms_position(
-                    grid_dx, grid_dy, grid_dz, structure, mode="tricubic"
+                    grid_dx,
+                    grid_dy,
+                    grid_dz,
+                    structure,
+                    mode="tricubic",
+                    selection=selection,
                 )
                 timelog.end("UpdateModel")
 
             # run pseudo-regularisation end of every shift-field iteration
             # not recommended as the convergence rate is slower
             # i.e. shifts might get cancelled or reduced from pseudo-regularisation
-            if pseudoreg == "yes":
+            if pseudoreg == "yes" and resolution >= 6.0:
                 timelog.start("PseudoReg")
                 preg.regularize_frag(structure, dbscan_cluster=dbscan_cluster)
                 timelog.end("PseudoReg")
@@ -415,6 +447,8 @@ def main(args):
                 reso=resolution,
                 rate=samp_rate,
                 grid_shape=downsamp_shape,
+                fft_obj=cmap_fftobj,
+                ifft_obj=cmap_ifftobj,
             )
             timelog.start("DiffMap")
             scl_map, scl_cmap, dmap = map_funcs.calc_diffmap(
@@ -424,7 +458,7 @@ def main(args):
                 resolution,
                 gridshape,
                 gridshape,
-                lpfilt_pre=True,
+                lpfilt_pre=diffmap_lpfilter,
                 lpfilt_post=False,
                 refscl=True,
                 randsize=0.1,
@@ -434,7 +468,7 @@ def main(args):
                 ifft_obj=ifft_obj,
             )
             timelog.end("DiffMap")
-            if verbose >= 4:
+            if verbose >= 5:
                 fileio.write_map_as_MRC(
                     scl_map, fullMap.unit_cell, outpath=f"scl_mapin_{rcyc+1}_{cyc}.mrc"
                 )
@@ -451,6 +485,10 @@ def main(args):
             ovl_map, ovl_mdl = map_funcs.calculate_overlap_scores(
                 scl_map, scl_cmap, mapcurreso_t, fltrcmap_t
             )
+            if ovl_map >= 0.5:
+                diffmap_lpfilter = False
+            else:
+                diffmap_lpfilter = True
             timelog.end("Scoring")
             m = " TEMPy scores :\n"
             m += f"  Fraction of map overlapping with model : {ovl_map:.3f}\n"
@@ -466,7 +504,8 @@ def main(args):
                         coor_sum_sq += model_current[ch][r][a].pos.dist(atom2.pos) ** 2
                         count += 1
             coor_rmsd = np.sqrt(coor_sum_sq / count)
-            print(f"RMSD : {coor_rmsd}")
+            if verbose >= 2:
+                print(f" RMSD : {coor_rmsd:.4f}")
             if rcyc == 0:
                 tolerance = (coor_tol / 2) * resolution
             else:
@@ -537,14 +576,15 @@ def main(args):
         # better to run at the end of each Regularise-Refine cycle (macro-cycle)
         uiso_refined = False
 
-        if refuiso:  # and rcyc == (len(res_list) - 1):
+        if refuiso:  # and (rcyc in [0, len(res_list)//2, len(res_list)-1]):
             uiso_converged = False
             ucyc = 0
             print(" REFINE UISO")
-            outfname = "{0}_intermediate_rescyc{1}_cyc{2}_pre_refuiso.pdb".format(
-                pathfname, rcyc + 1, cyc
-            )
-            structure.write_minimal_pdb(f"{outfname}")
+            if verbose >= 2:
+                outfname = "{0}_intermediate_rescyc{1}_cyc{2}_pre_refuiso.pdb".format(
+                    pathfname, rcyc + 1, cyc
+                )
+                structure.write_minimal_pdb(f"{outfname}")
             while not uiso_converged:
                 # calculate model map density
                 model_current = structure[0].clone()
@@ -555,8 +595,17 @@ def main(args):
                     reso=resolution,
                     rate=samp_rate,
                     grid_shape=downsamp_shape,
+                    fft_obj=cmap_fftobj,
+                    ifft_obj=cmap_ifftobj,
+                    # lpfilt=False
                 )
-
+                if verbose > 6:
+                    fileio.write_map_as_MRC(
+                        cmap_grid,
+                        fullMap.unit_cell,
+                        spacegroup="P1",
+                        outpath=f"cmap_uiso{rcyc}.mrc",
+                    )
                 timelog.end("MapDensity")
                 # calculate difference map
                 timelog.start("DiffMap")
@@ -571,7 +620,7 @@ def main(args):
                     lpfilt_post=False,
                     refscl=True,
                     randsize=0.1,
-                    flag_dust=False,
+                    flag_dust=True,
                     verbose=verbose,
                     fft_obj=fft_obj,
                     ifft_obj=ifft_obj,
@@ -590,7 +639,7 @@ def main(args):
                 ovl_map, ovl_mdl = map_funcs.calculate_overlap_scores(
                     scl_map, scl_cmap, mapin_t, cmap_t
                 )
-                m = "Calculated map & model threshold are "
+                m = " Calculated map & model threshold are "
                 m += "{0:.2f} and {1:.2f} \n".format(
                     mapin_t,
                     cmap_t,
@@ -611,7 +660,7 @@ def main(args):
                     dmap,
                     mmap_downsamp,
                     radcyc,
-                    fltr,
+                    function_type,
                     gridshape,
                     fullMap.unit_cell.parameters,
                     fft_obj=fft_obj,
@@ -668,7 +717,7 @@ def main(args):
         grid_shape=gridshape.grid_shape,
     )
     timelog.start("MapDensity")
-    timelog.start("Scoring")
+    timelog.start("Scale")
     scl_map, scl_cmap = map_funcs.global_scale_maps(
         fullMap,
         cmap_grid,
@@ -679,6 +728,8 @@ def main(args):
         lpfilt_pre=True,
         ref_scale=True,
     )
+    timelog.end("Scale")
+    timelog.start("Scoring")
     if verbose > 5:
         fileio.write_map_as_MRC(
             grid_data=scl_cmap,
@@ -712,6 +763,12 @@ def main(args):
     # write final pdb
     outfname = "{0}_refined_final.pdb".format(pathfname)
     structure.write_minimal_pdb(f"{outfname}")
+    # shift refined model back to input map origin if they have been offset
+    if not np.array_equal(ori0, grid_info.origin):
+        tr = gemmi.Transform(gemmi.Mat33(), gemmi.Vec3(*ori0))
+        structure[0].transform_pos_and_adp(tr)
+        outfname = "{0}_refined_final_maporigin_match.pdb".format(pathfname)
+        structure.write_minimal_pdb(f"{outfname}")
     # TODO: restructure XML results or even JSON
     # write xml results
     # if xmlout is not None:
@@ -738,7 +795,6 @@ if __name__ == "__main__":
     # parser = SheetbendParser()
     # parser.get_args()
     # main(parser.args)
-    import sys
     from sheetbend_cmdln_parser import SheetbendParser
 
     sb_parser = SheetbendParser()  # args=args)
