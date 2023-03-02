@@ -666,6 +666,7 @@ def main(args):
                     fft_obj=fft_obj,
                     ifft_obj=ifft_obj,
                     verbose=verbose,
+                    timelog=timelog,
                 )
                 timelog.end("UISO")
                 timelog.start("Numpy2Grid")
