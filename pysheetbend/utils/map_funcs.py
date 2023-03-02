@@ -1,15 +1,12 @@
 from __future__ import absolute_import, print_function
-from logging import raiseExceptions
 import gemmi
 import numpy as np
-from numpy.fft import fftn, fftshift, ifftn, ifftshift
+from numpy.fft import fftshift, ifftshift
 from scipy.signal import resample
 from scipy.ndimage import measurements
-from typing import Union
 
 # from pysheetbend.shiftfield import effective_radius, fltr
 import pysheetbend.shiftfield_util as sf_util
-from math import fabs
 from pysheetbend.utils.cell import GridInfo
 from gemmi import Position as GPosition, FloatGrid, SpaceGroup
 
@@ -70,6 +67,7 @@ def update_atoms_position(
     structure,
     mode="linear",
     scale=1.0,
+    selection=False,
 ):
     """
     Interpolate values of atom positions on the grids and update positions.
@@ -78,30 +76,87 @@ def update_atoms_position(
     if mode not in modes:
         raise ValueError(f"Invalid mode. Expected one of {modes}")
     if mode == "linear":
-        for cra in structure[0].all():
-            dx = scale * grid_dx.interpolate_value(cra.atom.pos) * grid_dx.unit_cell.a
-            dy = scale * grid_dy.interpolate_value(cra.atom.pos) * grid_dy.unit_cell.b
-            dz = scale * grid_dz.interpolate_value(cra.atom.pos) * grid_dz.unit_cell.c
-            cra.atom.pos += GPosition(dx, dy, dz)
-
+        if not selection:
+            for cra in structure[0].all():
+                dx = (
+                    scale
+                    * grid_dx.interpolate_value(cra.atom.pos)
+                    * grid_dx.unit_cell.a
+                )
+                dy = (
+                    scale
+                    * grid_dy.interpolate_value(cra.atom.pos)
+                    * grid_dy.unit_cell.b
+                )
+                dz = (
+                    scale
+                    * grid_dz.interpolate_value(cra.atom.pos)
+                    * grid_dz.unit_cell.c
+                )
+                cra.atom.pos += GPosition(dx, dy, dz)
+        else:
+            sel = gemmi.Selection().set_residue_flags("s")
+            for model in sel.models(structure):
+                for ch in sel.chains(model):
+                    for res in sel.residues(ch):
+                        for atom in sel.atoms(res):
+                            dx = (
+                                scale
+                                * grid_dx.interpolate_value(atom.pos)
+                                * grid_dx.unit_cell.a
+                            )
+                            dy = (
+                                scale
+                                * grid_dy.interpolate_value(atom.pos)
+                                * grid_dy.unit_cell.b
+                            )
+                            dz = (
+                                scale
+                                * grid_dz.interpolate_value(atom.pos)
+                                * grid_dz.unit_cell.c
+                            )
+                            atom.pos += GPosition(dx, dy, dz)
     if mode == "tricubic":
-        for cra in structure[0].all():
-            dx = (
-                scale
-                * grid_dx.tricubic_interpolation(cra.atom.pos)
-                * grid_dx.unit_cell.a
-            )
-            dy = (
-                scale
-                * grid_dy.tricubic_interpolation(cra.atom.pos)
-                * grid_dy.unit_cell.b
-            )
-            dz = (
-                scale
-                * grid_dz.tricubic_interpolation(cra.atom.pos)
-                * grid_dz.unit_cell.c
-            )
-            cra.atom.pos += GPosition(dx, dy, dz)
+        if not selection:
+            for cra in structure[0].all():
+                dx = (
+                    scale
+                    * grid_dx.tricubic_interpolation(cra.atom.pos)
+                    * grid_dx.unit_cell.a
+                )
+                dy = (
+                    scale
+                    * grid_dy.tricubic_interpolation(cra.atom.pos)
+                    * grid_dy.unit_cell.b
+                )
+                dz = (
+                    scale
+                    * grid_dz.tricubic_interpolation(cra.atom.pos)
+                    * grid_dz.unit_cell.c
+                )
+                cra.atom.pos += GPosition(dx, dy, dz)
+        else:
+            sel = gemmi.Selection().set_residue_flags("s")
+            for model in sel.models(structure):
+                for ch in sel.chains(model):
+                    for res in sel.residues(ch):
+                        for atom in sel.atoms(res):
+                            dx = (
+                                scale
+                                * grid_dx.tricubic_interpolation(atom.pos)
+                                * grid_dx.unit_cell.a
+                            )
+                            dy = (
+                                scale
+                                * grid_dy.tricubic_interpolation(atom.pos)
+                                * grid_dy.unit_cell.b
+                            )
+                            dz = (
+                                scale
+                                * grid_dz.tricubic_interpolation(atom.pos)
+                                * grid_dz.unit_cell.c
+                            )
+                            atom.pos += GPosition(dx, dy, dz)
 
 
 def update_uiso_values(
@@ -211,7 +266,8 @@ def effective_radius(radius, function="quadratic"):
         radius: float
             radius cutoff
         func: {"step", "linear", "quadratic"}
-            function type used to effective radius of the radial function. Default to "quadratic"
+            function type used to effective radius of the radial function.
+            Default to "quadratic"
 
     Return
     ------
@@ -300,9 +356,9 @@ def prepare_mask_filter(
     rad_x = rad_x * apix[0]
     rad_y = rad_y * apix[1]
     rad_z = rad_z * apix[2]
-    rad_x = rad_x ** 2
-    rad_y = rad_y ** 2
-    rad_z = rad_z ** 2
+    rad_x = rad_x**2
+    rad_y = rad_y**2
+    rad_z = rad_z**2
     dist = np.sqrt(rad_x[:, None, None] + rad_y[:, None] + rad_z)
     # dist_ind = zip(*np.nonzero(dist < rad))
     dist_bool = np.logical_and((dist < rad), (dist < fltr_radius))
@@ -352,31 +408,33 @@ def make_filter_edge_centered(
     eff_rad = effective_radius(filter_radius, function)
     fltr_data_r = np.zeros(grid_info.grid_shape, dtype=np.float32)
     x, y, z = grid_info.grid_shape
-    if grid_info.grid_shape[0] % 2:  # odd
-        # to make sure dist 0.0 is at the start after calculation
-        rad_x = np.arange(-np.ceil(x / 2.0), np.floor(x / 2.0))
-        rad_y = np.arange(-np.ceil(y / 2.0), np.floor(y / 2.0))
-        rad_z = np.arange(-np.ceil(z / 2.0), np.floor(z / 2.0))
-    else:
+    if not grid_info.grid_shape[0] % 2:  # even
         rad_x = np.arange(-np.floor(x / 2.0), np.ceil(x / 2.0))
         rad_y = np.arange(-np.floor(y / 2.0), np.ceil(y / 2.0))
         rad_z = np.arange(-np.floor(z / 2.0), np.ceil(z / 2.0))
-
+    else:  # odd
+        rad_x = np.arange(-np.ceil(x / 2.0), np.floor(x / 2.0))
+        rad_y = np.arange(-np.ceil(y / 2.0), np.floor(y / 2.0))
+        rad_z = np.arange(-np.ceil(z / 2.0), np.floor(z / 2.0))
+    # shift negative indices to positive, periodic space
     rad_x[rad_x < 0] += x
     rad_y[rad_y < 0] += y
     rad_z[rad_z < 0] += z
+    # shift center (array value 0.0) to edge
     rad_x -= grid_info.grid_half[0]
     rad_y -= grid_info.grid_half[1]
     rad_z -= grid_info.grid_half[2]
+    # calculate distance from center
     rad_x *= grid_info.voxel_size[0] + grid_info.grid_start[0]
     rad_y *= grid_info.voxel_size[1] + grid_info.grid_start[1]
     rad_z *= grid_info.voxel_size[2] + grid_info.grid_start[2]
-    rad_x = rad_x ** 2
-    rad_y = rad_y ** 2
-    rad_z = rad_z ** 2
+    rad_x = rad_x**2
+    rad_y = rad_y**2
+    rad_z = rad_z**2
     dist = np.sqrt(rad_x[:, None, None] + rad_y[:, None] + rad_z)
+    # xi, yi, zi = np.meshgrid(rad_x, rad_y, rad_z, sparse=True, copy=False, indexing='ij') # noqa E501
+    # dist = np.sqrt(xi**2 + yi**2 + zi**2)
     dist_bool = np.logical_and((dist < eff_rad), (dist < filter_radius))
-
     if function == "quadratic":
         rf = pow(1.0 - dist[dist_bool] / filter_radius, 2)
     elif function == "linear":
@@ -385,7 +443,7 @@ def make_filter_edge_centered(
         rf = np.full_like(dist, fill_value=1.0)
     f000 = np.sum(rf)
     fltr_data_r[dist_bool] = rf[:]
-    if verbose >= 1:
+    if verbose >= 2:
         print(f"f000 = {f000:.4f}")
 
     return fltr_data_r, f000
@@ -394,8 +452,10 @@ def make_filter_edge_centered(
 def fft_convolution_filter(
     data_arr: np.ndarray,
     filter: np.ndarray,
-    scale,
     grid_info: GridInfo,
+    weight,
+    scale_factor=1.0,
+    scale_type="relative",
     fft_obj=None,
     ifft_obj=None,
 ):
@@ -404,27 +464,38 @@ def fft_convolution_filter(
     Arguments:
         data_arr: numpy array of data
         filter: numpy array of filter
-        scale: scale value for the fft convolution
+        grid_info: GridInfo class containing grid info
+        weight: Weight from filter data array. e.g cumulative sum of radial filter data
+        scale_factor: scale factor for the fft convolution. Default=1.0
+        scale_type: Scaling type "none", "absolute", "relative". Default="relative"
         fft_obj: planned fft object
         ifft_obj: planned ifft object
-        grid_info: GridInfo class containing grid info
     """
     if fft_obj is None:
         fft_obj, ifft_obj = sf_util.plan_fft_ifft(gridinfo=grid_info.grid_shape)
-
+    # copy map data and filter data
     data_r = np.zeros(grid_info.grid_shape, dtype=np.float32)
     data_r = data_arr.copy()
     fltr_input = np.zeros(grid_info.grid_shape, dtype=np.float32)
     fltr_input = filter.copy()
-
+    # create complex data array
     fltr_data_c = np.zeros(grid_info.grid_reci, dtype=np.complex64)
     data_c = np.zeros(grid_info.grid_reci, dtype=np.complex64)
     fltr_data_c = fft_obj(fltr_input, fltr_data_c)
     fltr_data_c = fltr_data_c.conjugate().copy()
-
+    # fourier transform of map data
     data_c = fft_obj(data_r, data_c)
     data_c = data_c.conjugate().copy()
-
+    # Scaling may be apply. "absolute" will just apply a scale factor to the result,
+    # or "relative", which scales the filter relative to its own integral.
+    # Therefore, "relative" scaling with a scale factor of 1.0 gives an output map
+    # on the same scale as the input map.
+    scale = 1.0
+    if scale_type == "relative":
+        scale = scale_factor / weight
+    elif scale_type == "absolute":
+        scale = scale_factor
+    # apply filter and inverse fourier transform
     data_c[:, :, :] = scale * data_c[:, :, :] * fltr_data_c[:, :, :]
     data_c = data_c.conjugate().copy()
     data_r = ifft_obj(data_c, data_r)
@@ -487,13 +558,12 @@ def calculate_map_threshold(map_data, sigma_factor: float = 2.0):
     try:
         peak, avg, sigma = get_peak_and_sigma(maparray)
         vol_threshold = float(avg) + (sigma_factor * float(sigma))
-    except:
+    except Exception:
         try:
             mean = np.nanmean(maparray)
             sigma = np.nanstd(maparray)
             vol_threshold = float(mean) + (1.5 * float(sigma))
-        # peak, avg, sigma = get_peak_and_sigma(map_data)
-        except:
+        except Exception:
             vol_threshold = 0.0
 
     return vol_threshold
@@ -550,7 +620,6 @@ def calculate_overlap_scores(
 
 
 def calculate_pixel_size(cell_size, grid_shape):
-
     x = cell_size.a / float(grid_shape[0])  # x
     y = cell_size.b / float(grid_shape[1])  # y
     z = cell_size.c / float(grid_shape[2])  # z
@@ -650,7 +719,7 @@ def downsample_mask(mask_array, downsamp_shape):
     return np.ma.masked_less(mask_array, mask_array == 0).mask
 
 
-def make_fourier_shell(map_shape, keep_shape=False, fftshift=True, normalise=False):
+def make_fourier_shell(map_shape, keep_shape=False, fftshift=True, normalise=True):
     """
     Make grid sampling frequencies as distance from centre for a given grid
     Return:
@@ -659,35 +728,35 @@ def make_fourier_shell(map_shape, keep_shape=False, fftshift=True, normalise=Fal
     if keep_shape:
         rad_0 = np.arange(
             np.floor(map_shape[0] / 2.0) * -1, np.ceil(map_shape[0] / 2.0)
-        ) / float(np.floor(map_shape[0]))
+        )  # / float(np.floor(map_shape[0]))
         rad_1 = np.arange(
             np.floor(map_shape[1] / 2.0) * -1, np.ceil(map_shape[1] / 2.0)
-        ) / float(np.floor(map_shape[1]))
+        )  # / float(np.floor(map_shape[1]))
         rad_2 = np.arange(
             np.floor(map_shape[2] / 2.0) * -1, np.ceil(map_shape[2] / 2.0)
-        ) / float(np.floor(map_shape[2]))
+        )  # / float(np.floor(map_shape[2]))
         if not fftshift:
             rad_2 = ifftshift(rad_2)
     else:
         rad_0 = np.arange(
             np.floor(map_shape[0] / 2.0) * -1, np.ceil(map_shape[0] / 2.0)
-        ) / float(np.floor(map_shape[0]))
+        )  # / float(np.floor(map_shape[0]))
         rad_1 = np.arange(
             np.floor(map_shape[1] / 2.0) * -1, np.ceil(map_shape[1] / 2.0)
-        ) / float(np.floor(map_shape[1]))
-        rad_2 = np.arange(0, np.floor(map_shape[2] / 2.0) + 1) / float(
-            np.floor(map_shape[2])
-        )
+        )  # / float(np.floor(map_shape[1]))
+        rad_2 = np.arange(0, np.floor(map_shape[2] / 2.0) + 1)  # / float(
+        # np.floor(map_shape[2])
+        # )
     if not fftshift:
-        rad_0 = fftshift(rad_0)
-        rad_1 = fftshift(rad_1)
+        rad_0 = ifftshift(rad_0)
+        rad_1 = ifftshift(rad_1)
     if normalise:
         rad_0 = rad_0 / float(np.floor(map_shape[0]))
         rad_1 = rad_1 / float(np.floor(map_shape[1]))
         rad_2 = rad_2 / float(np.floor(map_shape[2]))
-    rad_2 = rad_2 ** 2
-    rad_1 = rad_1 ** 2
-    rad_0 = rad_0 ** 2
+    rad_2 = rad_2**2
+    rad_1 = rad_1**2
+    rad_0 = rad_0**2
     dist = np.sqrt(rad_0[:, None, None] + rad_1[:, None] + rad_2)
     return dist
 
@@ -708,6 +777,46 @@ def tanh_lowpass(map_shape, cutoff, fall=0.3, keep_shape=False):
     dist = 0.5 * dist
     del dist1
     return dist
+
+
+def lowpass_map(
+    array_data,
+    cutoff,
+    grid_shape=None,
+    grid_reci=None,
+    fftobj=None,
+    ifftobj=None,
+    return_fftobj=False,
+):
+    """lowpass map with tanh_lowpass filter with fall=0.3
+
+    Args:
+        array_data (numpy.array): array data
+        cutoff (float): cutoff freq, voxel_size/resolution
+        fftobj (pyfftw.fft): pyfftw fft object
+        ifftobj (pyfftw.ifft): pyfftw ifft object
+        return_fftobj (boolean): return planned fft, ifft objects
+
+    Return:->nd.array
+        lowpassed map
+    """
+    if fftobj is None or ifftobj is None:
+        fftobj, ifftobj = sf_util.plan_fft_ifft(
+            grid_shape=grid_shape, grid_reci=grid_reci
+        )
+    if isinstance(array_data, gemmi.FloatGrid):
+        array_data = np.array(array_data, copy=False, dtype=np.float32)
+    ft1 = fftobj(array_data)
+    ft1 = fftshift(ft1, axes=(0, 1))
+    flt1 = tanh_lowpass(array_data.shape, cutoff, fall=0.3, keep_shape=False)
+    ft1[:] = ft1 * flt1
+    del flt1
+    lowpass_data = np.zeros(array_data.shape, dtype=np.float32)
+    lowpass_data = ifftobj(ifftshift(ft1, axes=(0, 1)), lowpass_data)
+    if return_fftobj:
+        return lowpass_data, fftobj, ifftobj
+    else:
+        return lowpass_data
 
 
 def amplitude_match(
@@ -739,10 +848,10 @@ def amplitude_match(
         cutoff2 = grid2_info.voxel_size[0] / float(reso)
         if lpfilt_pre and not lpfilt_post:
             ftfltr1 = tanh_lowpass(
-                grid1_info.grid_shape, cutoff1, fall=0.2, keep_shape=False
+                grid1_info.grid_shape, cutoff1, fall=0.3, keep_shape=False
             )
             ftfltr2 = tanh_lowpass(
-                grid2_info.grid_shape, cutoff2, fall=0.2, keep_shape=False
+                grid2_info.grid_shape, cutoff2, fall=0.3, keep_shape=False
             )
             ft1[:] = ft1 * ftfltr1
             ft2[:] = ft2 * ftfltr2
@@ -907,7 +1016,7 @@ def grid_footprint():
 
 def label_patches(mapdata, map_threshold, prob=0.1, inplace=False):
     # Taken from Agnel's code in TEMPy library / CCPEM
-    ftpt = grid_footprint
+    ftpt = grid_footprint()
     binmap = mapdata > float(map_threshold)
     label_array, labels = measurements.label(mapdata * binmap, structure=ftpt)
     sizes = measurements.sum(binmap, label_array, range(labels + 1))
@@ -979,7 +1088,7 @@ def calc_diffmap(
     ifft_obj=None,
 ):
     """
-    Calculate difference map, rewritten from Agnel's difference map calculation in CCPEM TEMpy
+    Calculate difference map, rewritten from Agnel's difference map calculation in CCPEM TEMpy # noqa E501
 
     """
     t1 = 2.0 if res1 > 4.0 else 2.5
@@ -1081,7 +1190,10 @@ def global_scale_maps(
     if fft_obj is None:
         fft_obj, ifft_obj = sf_util.plan_fft_ifft(gridinfo=ref_grid_info)
 
-    scale_ref, scale_tgt, = amplitude_match(
+    (
+        scale_ref,
+        scale_tgt,
+    ) = amplitude_match(
         ref_map,
         target_map,
         ref_grid_info,
@@ -1143,7 +1255,7 @@ if __name__ == "__main__":
 
     mapin = "/home/swh514/Projects/data/EMD-3488/map/emd_3488.map"
     # pdbin = '/home/swh514/Projects/data/EMD-3488/fittedModels/PDB/pdb5ni1_cryst1.ent'
-    pdbin = "/home/swh514/Projects/work_and_examples/shiftfield/EMD-3488/4angs_lowres/translate_4angxyz.pdb"
+    pdbin = "/home/swh514/Projects/work_and_examples/shiftfield/EMD-3488/4angs_lowres/translate_4angxyz.pdb"  # noqa E501
     m, gridinfo = fileio.read_map(mapin)
     model, hetatm = fileio.get_structure(pdbin)
     apix0 = gridinfo.voxel_size

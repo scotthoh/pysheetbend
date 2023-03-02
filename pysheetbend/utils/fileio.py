@@ -113,7 +113,7 @@ def write_map_as_MRC(
     Write out map as MRC, for different map objects
     Arguments:
         grid_data: data (numpy 3D array)
-        unitcell: unit cell parameters 1D tuple or 1D np.array (a, b, c, alpha, beta, gamma)
+        unitcell: unit cell parameters 1D tuple or 1D np.array (a, b, c, alpha, beta, gamma) # noqa E501
         spacegroup: spacegroup for data; default: P1
         outpath: output map path. Default: "mapout.mrc"
         verbose: verbosity, default=0
@@ -124,7 +124,7 @@ def write_map_as_MRC(
     mrcout.grid = gemmi.FloatGrid(grid_data)
     if not isinstance(unitcell, gemmi.UnitCell):
         if len(unitcell) != 6:
-            raise TypeError(f"Expecting unit cell array with length 6")
+            raise TypeError("Expecting unit cell array with length 6")
         else:
             mrcout.grid.unit_cell.set(
                 unitcell[0],
@@ -167,7 +167,7 @@ def write_mask_as_MRC(
     Write out mask as MRC
     Arguments:
         maskin: numpy 3D mask array of boolean type ((np.ma.mask)
-        unitcell: unit cell parameters 1D tuple or 1D np.array (a, b, c, alpha, beta, gamma)
+        unitcell: unit cell parameters 1D tuple or 1D np.array (a, b, c, alpha, beta, gamma) # noqa E501
         spacegroup: spacegroup for data; default: P1
         outpath: output map path. Default: "mapout.mrc"
         verbose: verbosity, default=0
@@ -180,7 +180,7 @@ def write_mask_as_MRC(
     mrcout.grid = gemmi.FloatGrid(mask)
     if not isinstance(unitcell, gemmi.UnitCell):
         if len(unitcell) != 6:
-            raise TypeError(f"Expecting unit cell array with length 6")
+            raise TypeError("Expecting unit cell array with length 6")
         else:
             mrcout.grid.unit_cell.set(
                 unitcell[0],
