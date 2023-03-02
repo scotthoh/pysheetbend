@@ -8,7 +8,7 @@ as a precursor to conventional refinement. It can be applied at any resolutions,
 to correcting large shifts in secondary structure elements in molecular replacement. It can also be used to refine B-factors.
 
 ### Read the docs
-Documentation can be found in [here](pysheetbend.readthedocs.io).
+Documentation can be found in [here](https://pysheetbend.readthedocs.io).
 
 ### Installing the python package
 Activate your python environment. \
