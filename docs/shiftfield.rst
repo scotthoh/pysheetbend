@@ -64,7 +64,7 @@ Keyworded input:
 * ``--res-by-cycle`` Set the resolution for each macro cycle. Resolutions are separated by space. If there are fewer resolutions than macro-cycles, linear interpolation is used to fill in the remaining values.\
 * ``--cycles`` Number of cycles within each resolution/macro cycle. Default: 1
 * ``--macro-cycles`` Number of resolution/macro cycles. Default: 1
-* ``--radius`` Set the radius to be used in shift-field refinement. This controls the size of the regions which are 'dragged' by the morphing calculation. Larger radii lead to bulkier changes, smaller radii allow smaller features to move independently, at a cost of messing up the geometry. Avoid radius < 2.5*resolution. Default = radius_scale * resolution of the cycle
+* ``--radius`` Set the radius to be used in shift-field refinement. This controls the size of the regions which are 'dragged' by the morphing calculation. Larger radii lead to bulkier changes, smaller radii allow smaller features to move independently, at a cost of messing up the geometry. Avoid radius < 2.5\*resolution. Default = radius_scale\*resolution of the cycle
 * ``--radius-scale`` Set the radius in proportion to the resolution for the current cycle. The resolution is multiplied by this factor to get the radius. Overidden by radius.
 * ``--coord`` Performs coordinate refinement. If not refinement option is specified, coordinate refinement is enabled by default.
 * ``--uiso`` Performs B-factor refinement.
