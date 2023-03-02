@@ -1,6 +1,5 @@
 from __future__ import print_function
-from typing import OrderedDict, Union
-import pathlib
+from typing import Union
 import numpy as np
 from timeit import default_timer as timer
 from dataclasses import dataclass

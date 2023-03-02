@@ -1,6 +1,8 @@
-import re
+# Author: Soon Wen Hoh
+# University of York 2023
 import gemmi
-from pysheetbend.utils.map_funcs import resample_data_by_boxsize
+from pysheetbend.utils.map_funcs import resample_data_by_boxsize, lowpass_map
+from numpy import array
 
 
 def calculate_density(structure, reso, rate=1.5):
@@ -18,6 +20,9 @@ def calculate_density_with_boxsize(
     reso,
     rate=1.5,
     grid_shape=(100, 100, 100),
+    fft_obj=None,
+    ifft_obj=None,
+    lpfilt=True
     # origin=None,
 ):
     dencalc = gemmi.DensityCalculatorE()
@@ -34,7 +39,26 @@ def calculate_density_with_boxsize(
     # else:
     dencalc.set_grid_cell_and_spacegroup(structure)
     dencalc.put_model_density_on_grid(structure[0])
-    resample_grid = resample_data_by_boxsize(dencalc.grid, grid_shape)
+    # lowpass before resampling
+    cutoff = (structure.cell.parameters[0] / dencalc.grid.shape[0]) / reso
+    grid_reci = array(
+        [dencalc.grid.shape[0], dencalc.grid.shape[1], dencalc.grid.shape[2] // 2 + 1]
+    )
+    if lpfilt:
+        if fft_obj is None or ifft_obj is None:
+            resample_grid = lowpass_map(
+                dencalc.grid,
+                cutoff=cutoff,
+                grid_shape=dencalc.grid.shape,
+                grid_reci=grid_reci,
+            )
+        else:
+            resample_grid = lowpass_map(
+                dencalc.grid, cutoff=cutoff, fftobj=fft_obj, ifftobj=ifft_obj
+            )
+        resample_grid = resample_data_by_boxsize(resample_grid, grid_shape)
+    else:
+        resample_grid = resample_data_by_boxsize(dencalc.grid, grid_shape)
 
     return resample_grid
 

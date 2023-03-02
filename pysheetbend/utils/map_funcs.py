@@ -1,3 +1,5 @@
+# Author: Soon Wen Hoh
+# University of York 2023
 from __future__ import absolute_import, print_function
 import gemmi
 import numpy as np

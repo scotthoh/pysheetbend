@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 import os
-import math
+import sys
 from timeit import default_timer as timer
 from collections import OrderedDict
 import numpy as np
+import gemmi
 
 """
 from TEMPy.Vector import Vector as Vector
@@ -28,15 +29,13 @@ from TEMPy.protein.prot_rep_biopy import BioPy_Structure as BPS
 
 #from TEMPy.protein.structure_blurrer import StructureBlurrer
 """
-#'''
+
 try:
     import pyfftw
 
     pyfftw_flag = True
 except ImportError:
     pyfftw_flag = False
-
-import sys
 
 if sys.version_info[0] > 2:
     from builtins import isinstance
@@ -189,7 +188,11 @@ def calc_best_grid_apix(spacing, cellsize, verbose=0):
 
 
 def plan_fft_ifft(
-    gridinfo: "GridInfo", fft_in_dtype=np.float32, fft_out_dtype=np.complex64
+    gridinfo=None,
+    grid_shape=None,
+    grid_reci=None,
+    fft_in_dtype=np.float32,
+    fft_out_dtype=np.complex64,
 ):
     """
     Returns fft and ifft objects. Plan fft and ifft.
@@ -200,6 +203,12 @@ def plan_fft_ifft(
     Returns
         fft, ifft objects
     """
+    if gridinfo is None:
+        grid_shape = grid_shape
+        grid_reci = grid_reci
+    else:
+        grid_shape = gridinfo.grid_shape
+        grid_reci = gridinfo.grid_reci
     fft_out_dtype = np.complex64
     if fft_in_dtype == np.float64:
         fft_out_dtype = np.complex128
@@ -208,11 +217,11 @@ def plan_fft_ifft(
             raise ImportError
         # plan fft
         fft_arrin = pyfftw.empty_aligned(
-            shape=gridinfo.grid_shape,
+            shape=grid_shape,
             dtype=fft_in_dtype,
         )
         fft_arrout = pyfftw.empty_aligned(
-            shape=gridinfo.grid_reci,
+            shape=grid_reci,
             dtype=fft_out_dtype,
         )
         fft = pyfftw.FFTW(
@@ -225,11 +234,11 @@ def plan_fft_ifft(
 
         # plan ifft
         ifft_arrin = pyfftw.empty_aligned(
-            shape=gridinfo.grid_reci,
+            shape=grid_reci,
             dtype=fft_out_dtype,
         )
         ifft_arrout = pyfftw.empty_aligned(
-            shape=gridinfo.grid_shape,
+            shape=grid_shape,
             dtype=fft_in_dtype,
         )
         ifft = pyfftw.FFTW(
@@ -242,45 +251,6 @@ def plan_fft_ifft(
     except ImportError:
         print("pyfftw import error. Not running")
     return fft, ifft
-
-
-def cor_mod(a, b):
-    """
-    Returns corrected remainder of division. If remainder <0,
-    then adds value b to remainder.
-    Arguments
-    *a*
-      Dividend
-    *b*
-      Divisor
-    """
-    c = np.fmod(a, b)
-    if c < 0:
-        c += b
-    return int(c)
-
-
-def hkl_c(c, ch, g):
-    """
-    Returns the index
-    Arguments
-    *c*
-      Index h,k,l
-    *ch*
-      Half of the grid shape
-    *g*
-      Real space grid shape
-    """
-
-    # z, y, x; return vector(x, y ,z)
-    cv = Vector(int(c[2]), int(c[1]), int(c[0]))
-    chv = Vector(int(ch[2]), int(ch[1]), int(ch[0]))
-    # cv = Vector(int(c[0]), int(c[1]), int(c[2]))
-    # chv = Vector(int(ch[0]), int(ch[1]), int(ch[2]))
-    v1 = cv + chv
-    m1 = Vector(cor_mod(v1.x, g[2]), cor_mod(v1.y, g[1]), cor_mod(v1.z, g[0]))
-
-    return m1 - chv
 
 
 def eightpi2():
@@ -476,32 +446,6 @@ def metric_reci_lengthsq(x, y, z, metric_tensor):
     )
 
 
-def crop_mapgrid_points(x0, y0, z0, densmap, k=4):
-    """
-    Return cropped map containing density data
-    of surrounding 64 map grid points of atom_point
-    """
-    boxmap = Map(
-        np.zeros((4, 4, 4)),
-        [0, 0, 0],
-        densmap.apix,
-        "mapname",
-    )
-
-    # problem: should the atom point be at the corner of the box or
-    # the centre for interpolation
-    # atm mapgridposition at corner
-    for iz in range(0, 4):
-        for iy in range(0, 4):
-            for ix in range(0, 4):
-                mx = ix + x0
-                my = iy + y0
-                mz = iz + z0
-                boxmap.fullMap[iz, iy, ix] = densmap.fullMap[mz, my, mx]
-
-    return boxmap  # cropped map, atm pos in cropped map
-
-
 def get_lowerbound_posinnewbox(xg, yg, zg):
     """
     Return lowerbound of the index, and index in new box
@@ -559,233 +503,18 @@ def maptree_zyx(densmap):
     return gridtree, indi
 
 
-class RadialFilter:
+def mark_selected_residues(structure, selection):
+    """Mark residues in selection with 's'
+    Args:
+        structure (Gemmi.structure): Structure to mark
+        selection (list): List of selection strings
     """
-    Radial filter object
-    """
-
-    def __init__(self, radcyc, function, densmap):
-        """
-        Initialise filter object, sets the radius and function to use
-        Arguments
-        *radcyc*
-          radius of the filter
-        *function*
-          0 = step, 1 = linear, 2 = quadratic
-        *densmap*
-          reference density map
-        """
-        self.verbose = 0
-        self.radius = radcyc
-        self.function = function
-        """if function == 'step':
-            self.function = 0
-        elif function == 'linear':
-            self.function = 1
-        elif function == 'quadratic':
-            self.function = 2
-        """
-        # function = step, linear, quadratic
-        # determine effective radius of radial function
-        self.nrad = 1000
-        self.drad = 0.25
-        self.sum_r = [0.0] * self.nrad
-        self.gridshape = GridDimension(densmap)
-
-        for i in range(0, self.nrad):
-            r = self.drad * (float(i) + 0.5)
-            self.sum_r[i] = r * r * math.fabs(self.fltr(r))
-
-        for i in range(1, self.nrad):
-            self.sum_r[i] += self.sum_r[i - 1]
-        for i in range(0, self.nrad):
-            if self.sum_r[i] > 0.99 * self.sum_r[self.nrad - 1]:
-                break
-        self.rad = self.drad * (float(i) + 1.0)
-        self.fltr_data_r = np.zeros(self.gridshape.grid_sam, dtype=np.float64)
-        f000 = 0.0
-        # z,y,x convention
-        origin = np.array([densmap.origin[2], densmap.origin[1], densmap.origin[0]])
-        if isinstance(densmap.apix, tuple):
-            apix = np.array([densmap.apix[2], densmap.apix[1], densmap.apix[0]])
-        else:
-            apix = np.array([densmap.apix, densmap.apix, densmap.apix])
-
-        # g_half = (g_real[0]//2, g_real[1]//2, g_real[0]//2+1)
-        # SB = StructureBlurrer()
-        # gt = SB.maptree(densmap)
-        self.gt = maptree_zyx(densmap)
-        # filpping indices made things wrong because the
-        # the chronology of indices has changed.
-        # is this true? pt1 = 001 and pt1 = 100 different
-        # start = timer() # flipping indices takes about 0.4 sec
-        # indi = np.flip(gt[1], 1) # gt[1] indices is x,y,z , flip become z,y,x
-        # end = timer()
-        # print('flip indices ', end-start)
-
-        gh = np.array([self.gridshape.g_half])
-        if self.verbose >= 1:
-            start = timer()
-        c = self.gt[1] + gh  # self.gridshape.g_half
-        if self.verbose >= 1:
-            end = timer()
-            print("indi + halfgrid ", end - start)
-
-        if self.verbose >= 1:
-            start = timer()
-        c1 = self.cor_mod1(c, self.gridshape.grid_sam) - gh
-        if self.verbose >= 1:
-            end = timer()
-            print("cor mod ", end - start)
-
-        if self.verbose >= 1:
-            start = timer()
-        pos = c1[:] * apix + origin
-        r = np.sqrt(np.sum(np.square(pos), axis=1))
-        if self.verbose >= 1:
-            end = timer()
-            print("indices get r ", end - start)
-        # for i in range(len(r)):
-        #    print(pos[i], c1[i], gt[1][i], r[i])
-        if self.verbose >= 1:
-            start = timer()
-            print("self.rad ", self.rad)
-        r_ind = np.nonzero(r < self.rad)
-        # r = np.where(r < self.rad, self.fltr(r), 0.0)
-        # r_ind = np.nonzero(r)
-        if self.verbose >= 1:
-            end = timer()
-            print("nonzero transpose ", end - start)
-
-        if self.verbose >= 1:
-            start = timer()
-        count = 0
-        # fill the radial function map
-        for i in r_ind[0]:
-            rf = self.fltr(r[i])
-            f000 += rf
-            # print(gt[1][i][0], gt[1][i][1], gt[1][i][2], rf)
-            count += 1
-            self.fltr_data_r[
-                self.gt[1][i][0], self.gt[1][i][1], self.gt[1][i][2]
-            ] = rf  # [i]
-
-        if self.verbose >= 1:
-            end = timer()
-            print("fill radial function map ", end - start)
-            print("count ", count)
-        """
-        count = 0
-        print('self.rad ', self.rad)
-        for ind in range(0,len(gt[1])):
-            xyz = gt[1][ind]
-            c = hkl_c((xyz[2], xyz[1], xyz[0]), self.gridshape.g_half, self.gridshape.grid_sam)
-            pos = mapgridpos_to_coord((c[0],c[1],c[2]),densmap)
-            r = Vector(pos[0],pos[1],pos[2]).mod()
-            #r = Vector(cz, cy, cx).mod()
-            if r < self.rad:
-                print((pos[2],pos[1],pos[0]), (c[2],c[1],c[0]), (xyz[2], xyz[1], xyz[0]), r)
-                r = self.fltr(r)
-                f000 += r
-                print(r)
-                #self.fltr_data_r[xyz[2], xyz[1], xyz[0]] = r
-                count+=1
-        end=timer()
-        """
-        # calc scale factor
-        self.scale = 1.0 / f000
-        if self.verbose >= 1:
-            print("scale, ", self.scale, " f000, ", f000)
-
-    def cor_mod1(self, a, b):
-        """
-        Returns corrected remainder of division. If remainder <0,
-        then adds value b to remainder.
-        Arguments
-        *a*
-          array of Dividend (z,y,x indices)
-        *b*
-          array of Divisor (z,y,x indices)
-        """
-        c = np.fmod(a, b)
-        d = np.transpose(np.nonzero(c < 0))
-        # d, e = np.nonzero(c<0)
-        for i in d:  # range(len(d)):
-            c[i[0], i[1]] += b[i[1]]
-            # c[i, j] += b[i]
-        return c
-
-    def fltr(self, r):
-        """
-        Returns radius value from filter function
-        Arguments
-        *r*
-          radius
-        """
-        if r < self.radius:
-            if self.function == 2:
-                return pow((1.0 - r) / self.radius, 2)
-            elif self.function == 1:
-                return (1.0 - r) / self.radius
-            elif self.function == 0:
-                return 1.0
-        else:
-            return 0.0
-
-    def mapfilter(self, data_arr, fft_obj, ifft_obj):
-        """
-        Returns filtered data
-        Argument
-        *data_arr*
-          array of data to be filtered
-        *fft_obj*
-          fft object
-        *ifft_obj*
-          ifft object
-        """
-        # copy map data and filter data
-        data_r = np.zeros(self.gridshape.grid_sam, dtype=np.float64)
-        data_r = data_arr.copy()
-        fltr_input = np.zeros(self.gridshape.grid_sam, dtype=np.float64)
-        fltr_input = self.fltr_data_r.copy()
-
-        if self.verbose >= 1:
-            start = timer()
-        # create complex data array
-        fltr_data_c = np.zeros(self.gridshape.g_reci, dtype=np.complex128)
-        data_c = np.zeros(self.gridshape.g_reci, dtype=np.complex128)
-        # fourier transform of filter data
-        fltr_data_c = fft_obj(fltr_input, fltr_data_c)
-        fltr_data_c = fltr_data_c.conjugate().copy()
-        if self.verbose >= 1:
-            end = timer()
-            print("fft fltr_data : {0}s".format(end - start))
-        if self.verbose >= 1:
-            start = timer()
-        # fourier transform of map data
-        data_c = fft_obj(data_r, data_c)
-        data_c = data_c.conjugate().copy()
-        if self.verbose >= 1:
-            end = timer()
-            print("fft data : {0}s".format(end - start))
-        # apply filter
-        if self.verbose >= 1:
-            start = timer()
-        data_c[:, :, :] = self.scale * data_c[:, :, :] * fltr_data_c[:, :, :]
-        if self.verbose >= 1:
-            end = timer()
-            print("Convolution : {0}s".format(end - start))
-
-        # inverse fft
-        if self.verbose >= 1:
-            start = timer()
-        data_c = data_c.conjugate().copy()
-        data_r = ifft_obj(data_c, data_r)
-        if self.verbose >= 1:
-            end = timer()
-            print("ifft : {0}s".format(end - start))
-
-        return data_r
+    for select in selection:
+        sel = gemmi.Selection(select)
+        for model in sel.models(structure):
+            for chain in sel.chains(model):
+                for residue in sel.residues(chain):
+                    residue.flag = "s"
 
 
 # @dataclass #from dataclasses import dataclass
