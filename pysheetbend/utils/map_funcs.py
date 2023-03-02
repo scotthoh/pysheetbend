@@ -690,10 +690,10 @@ def make_mask_from_maps(
     mmap = fft_convolution_filter(
         combined_map,
         filt_data_r,
-        1.0 / f000,
-        grid_info,
-        fft_obj,
-        ifft_obj,
+        grid_info=grid_info,
+        weight=f000,
+        fft_obj=fft_obj,
+        ifft_obj=ifft_obj,
     )
     if verbose >= 5:
         print(f"{mmap.min()}, {mmap.max()}, {mmap.mean()}, {mmap.std()}")

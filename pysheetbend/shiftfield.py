@@ -11,164 +11,6 @@ from pysheetbend.utils import map_funcs
 # from memory_profiler import profile
 
 
-def prepare_filter(radcyc, function, gridinfo, verbose):
-    """
-    Sets the radius and function to use
-    Arguments
-        radcyc: radius of the filter
-        function: 0 = step, 1 = linear, 2 = quadratic
-        densmap: reference density map
-        verbose: verbosity
-    Return
-        N-D filter data array, weight
-    """
-    g_shape = gridinfo.grid_shape
-    # determine effective radius of radial function
-    rad = map_funcs.effective_radius(radcyc, function)
-    fltr_data_r = np.zeros(g_shape, dtype=np.float32)
-    # x,y,z convention
-    nx, ny, nz = g_shape
-    rad_x = np.arange(-np.floor(nx / 2.0), np.ceil(nx / 2.0))
-    rad_y = np.arange(-np.floor(ny / 2.0), np.ceil(ny / 2.0))
-    rad_z = np.arange(-np.floor(nz / 2.0), np.ceil(nz / 2.0))
-    # shift negative indices to positive, periodic space
-    rad_x[rad_x < 0] += g_shape[0]
-    rad_y[rad_y < 0] += g_shape[1]
-    rad_z[rad_z < 0] += g_shape[2]
-    # shift center (array value 0.0) to edge
-    rad_x -= g_shape[0] // 2
-    rad_y -= g_shape[1] // 2
-    rad_z -= g_shape[2] // 2
-    rad_x *= gridinfo.voxel_size[0] + gridinfo.grid_start[0]
-    rad_y *= gridinfo.voxel_size[1] + gridinfo.grid_start[1]
-    rad_z *= gridinfo.voxel_size[2] + gridinfo.grid_start[2]
-    xi, yi, zi = np.meshgrid(
-        rad_x, rad_y, rad_z, sparse=True, indexing="ij", copy=False
-    )
-    r = np.sqrt(xi**2 + yi**2 + zi**2)
-    r_bool = np.logical_and((r < rad), (r < radcyc))
-    if function == "quadratic":
-        rf = pow(1.0 - r[r_bool] / radcyc, 2)
-    elif function == "linear":
-        rf = 1.0 - r[r_bool] / radcyc
-    elif function == "step":
-        rf = np.full_like(r, fill_value=1.0)
-    fltr_data_r[r_bool] = rf[:]
-    f000 = np.sum(rf)
-    # calc scale factor
-    # scale = 1.0 / f000
-    if verbose >= 2:
-        print(" f000, ", f000)
-    del r, r_bool
-    return fltr_data_r, f000
-
-
-# @profile
-def cor_mod1(a, b):
-    """
-    Returns corrected remainder of division. If remainder <0,
-    then adds value b to remainder.
-    Arguments
-    *a*
-      array of Dividend (z,y,x indices)
-    *b*
-      array of Divisor (z,y,x indices)
-    """
-    c = np.fmod(a, b)
-    d = np.transpose(np.nonzero(c < 0))
-    # d, e = np.nonzero(c<0)
-    for i in d:  # range(len(d)):
-        c[i[0], i[1]] += b[i[1]]
-        # c[i, j] += b[i]
-    return c
-
-
-# @profile
-def mapfilter(data_arr, fltr_data_r, scale, fft_obj, ifft_obj, g_sam, g_reci):
-    """
-    Returns filtered data
-    Argument
-    *data_arr*
-      array of data to be filtered
-    *fft_obj*
-      fft object
-    *ifft_obj*
-      ifft object
-    """
-    # copy map data and filter data
-    # data_r = np.zeros(g_sam, dtype=np.float64)
-    # print(data_arr.dtype)
-    # print(fltr_data_r.dtype)
-    # print(fft_obj)
-    data_r = np.zeros(g_sam, dtype=np.float32)
-    data_r = data_arr.copy()
-    # fltr_input = np.zeros(g_sam, dtype=np.float64)
-    fltr_input = np.zeros(g_sam, dtype=np.float32)
-    fltr_input = fltr_data_r.copy()
-
-    # if self.verbose >= 1:
-    #    start = timer()
-    # create complex data array
-    # fltr_data_c = np.zeros(g_reci, dtype=np.complex128)
-    # data_c = np.zeros(g_reci, dtype=np.complex128)
-    fltr_data_c = np.zeros(g_reci, dtype=np.complex64)
-    data_c = np.zeros(g_reci, dtype=np.complex64)
-    # fourier transform of filter data
-    fltr_data_c = fft_obj(fltr_input, fltr_data_c)
-    fltr_data_c = fltr_data_c.conjugate().copy()
-    # if self.verbose >= 1:
-    #    end = timer()
-    #    print('fft fltr_data : {0}s'.format(end-start))
-    # if self.verbose >= 1:
-    #    start = timer()
-    # fourier transform of map data
-    data_c = fft_obj(data_r, data_c)
-    data_c = data_c.conjugate().copy()
-    # if self.verbose >= 1:
-    #    end = timer()
-    #    print('fft data : {0}s'.format(end-start))
-    # apply filter
-    # if self.verbose >= 1:
-    #    start = timer()
-    data_c[:, :, :] = scale * data_c[:, :, :] * fltr_data_c[:, :, :]
-    # if self.verbose >= 1:
-    #    end = timer()
-    #    print('Convolution : {0}s'.format(end-start))
-    # inverse fft
-    # if self.verbose >= 1:
-    #    start = timer()
-    # print(data_r.dtype, data_c.dtype)
-    data_c = data_c.conjugate().copy()
-    data_r = ifft_obj(data_c, data_r)
-    # if self.verbose >= 1:
-    #    end = timer()
-    #    print('ifft : {0}s'.format(end-start))
-    return data_r
-
-
-'''
-def get_indices_zyx(origin, apix, array_shape):
-    """
-    Return gridtree and indices (z,y,x) convention
-    Argument
-    *densmap*
-      Input density map
-    """
-    nz, ny, nx = array_shape
-
-    zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
-    zgc = zg * apix[2] + origin[2]
-    ygc = yg * apix[1] + origin[1]
-    xgc = xg * apix[0] + origin[0]
-
-    indi = np.vstack([zgc.ravel(), ygc.ravel(), xgc.ravel()]).T
-
-    # zg, yg, xg = np.mgrid[0:nz, 0:ny, 0:nx]
-    indi = np.vstack([zg.ravel(), yg.ravel(), xg.ravel()]).T
-    return gridtree, indi
-'''
-
-
 def gradient_map_calc(xdata_c, g_reci, g_real, g_half):
     ydata_c = np.zeros(xdata_c.shape, dtype=np.complex64)
     zdata_c = np.zeros(xdata_c.shape, dtype=np.complex64)
@@ -352,28 +194,28 @@ def shift_field_coord(
     y1map = map_funcs.fft_convolution_filter(
         y1map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    y2map = mapfilter(
+    y2map = map_funcs.fft_convolution_filter(
         y2map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    y3map = mapfilter(
+    y3map = map_funcs.fft_convolution_filter(
         y3map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    x11map = mapfilter(
+    x11map = map_funcs.fft_convolution_filter(
         x11map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    x12map = mapfilter(
+    x12map = map_funcs.fft_convolution_filter(
         x12map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    x13map = mapfilter(
+    x13map = map_funcs.fft_convolution_filter(
         x13map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    x22map = mapfilter(
+    x22map = map_funcs.fft_convolution_filter(
         x22map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    x23map = mapfilter(
+    x23map = map_funcs.fft_convolution_filter(
         x23map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    x33map = mapfilter(
+    x33map = map_funcs.fft_convolution_filter(
         x33map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
     timelog.end("Filter")
@@ -515,7 +357,7 @@ def shift_field_uiso(
     y1map = map_funcs.fft_convolution_filter(
         y1map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
-    x11map = mapfilter(
+    x11map = map_funcs.fft_convolution_filter(
         x11map, fltr_data_r, gridinfo, f000, fft_obj=fft_obj, ifft_obj=ifft_obj
     )
     # calculate U shifts
