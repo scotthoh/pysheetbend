@@ -63,8 +63,8 @@ class SheetbendParser:
         )
 
         infiles.add_argument(
-            "-no_ligands",
-            "--no_ligands",
+            "-no-ligands",
+            "--no-ligands",
             action="store_true",
             dest="no_ligands",
             help="Remove ligands.",
@@ -72,8 +72,8 @@ class SheetbendParser:
         )
 
         infiles.add_argument(
-            "-no_h2o",
-            "--no_waters",
+            "-no-h2o",
+            "--no-waters",
             action="store_true",
             dest="no_water",
             help="Remove water.",
@@ -135,7 +135,7 @@ class SheetbendParser:
         )
 
         outfiles.add_argument(
-            "--no_xmlout",
+            "--no-xmlout",
             action="store_true",
             dest="no_xml",
             help="If set, will not write XML outfile.",
@@ -244,7 +244,7 @@ class SheetbendParser:
         )
 
         ref.add_argument(
-            "--coor_tol",
+            "--coor-tol",
             type=float,
             dest="coor_tol",
             help=(

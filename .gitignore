@@ -2,4 +2,11 @@
 /*.egg-info
 /build/
 /dist/
+
+# VSCode stuff
 /.vscode
+
+# Sphinx documentation
+docs/_build/
+docs/_html/
+docs/build/
