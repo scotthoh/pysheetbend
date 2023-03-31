@@ -97,6 +97,7 @@ def update_atoms_position(
                 )
                 cra.atom.pos += GPosition(dx, dy, dz)
         else:
+            print("Updated selected atoms")
             sel = gemmi.Selection().set_residue_flags("s")
             for model in sel.models(structure):
                 for ch in sel.chains(model):
@@ -138,6 +139,7 @@ def update_atoms_position(
                 )
                 cra.atom.pos += GPosition(dx, dy, dz)
         else:
+            print("Updated atom positions")
             sel = gemmi.Selection().set_residue_flags("s")
             for model in sel.models(structure):
                 for ch in sel.chains(model):
@@ -159,6 +161,55 @@ def update_atoms_position(
                                 * grid_dz.unit_cell.c
                             )
                             atom.pos += GPosition(dx, dy, dz)
+
+
+def update_atoms_position_bead(
+    grid_dx,
+    grid_dy,
+    grid_dz,
+    structure,
+    com_model,
+    mode="linear",
+    scale=1.0,
+):
+    """Update atom positions based on each residues center of mass
+    shifting as a whole residue (bead)
+
+    Args:
+        grid_dx (_type_): _description_
+        grid_dy (_type_): _description_
+        grid_dz (_type_): _description_
+        structure (_type_): _description_
+        com_model (_type_):
+        mode (str, optional): _description_. Defaults to "linear".
+        scale (float, optional): _description_. Defaults to 1.0.
+        selection (bool, optional): _description_. Defaults to False.
+    """
+    modes = ["linear", "tricubic"]
+    if mode not in modes:
+        raise ValueError(f"Invalid mode. Expected one of {modes}")
+    if mode == "linear":
+        for c in structure[0]:
+            for r in c:
+                res_com = com_model[c.name][str(r.seqid)][r.name]
+                # sel = gemmi.Selection().set_atom_flags("c")
+                com = res_com[0].pos + r.find_atom(res_com[0].name, "*").pos
+                dx = scale * grid_dx.interpolate_value(com) * grid_dx.unit_cell.a
+                dy = scale * grid_dy.interpolate_value(com) * grid_dy.unit_cell.b
+                dz = scale * grid_dz.interpolate_value(com) * grid_dz.unit_cell.c
+                for a in r:
+                    a.pos += GPosition(dx, dy, dz)
+    if mode == "tricubic":
+        for c in structure[0]:
+            for r in c:
+                res_com = com_model[c.name][str(r.seqid)][r.name]
+                # sel = gemmi.Selection().set_atom_flags("c")
+                com = res_com[0].pos + r.find_atom(res_com[0].name, "*").pos
+                dx = scale * grid_dx.tricubic_interpolation(com) * grid_dx.unit_cell.a
+                dy = scale * grid_dy.tricubic_interpolation(com) * grid_dy.unit_cell.b
+                dz = scale * grid_dz.tricubic_interpolation(com) * grid_dz.unit_cell.c
+                for a in r:
+                    a.pos += GPosition(dx, dy, dz)
 
 
 def update_uiso_values(
@@ -183,6 +234,8 @@ def update_uiso_values(
             cra.atom.b_iso = sf_util.limit_biso(
                 (cra.atom.b_iso - db), biso_range[0], biso_range[1]
             )
+            if verbose >= 2:
+                shift_u.append(db)
     if mode == "tricubic":
         for cra in structure[0].all():
             du = scale * grid_du.tricubic_interpolation(cra.atom.pos)
@@ -192,6 +245,74 @@ def update_uiso_values(
             )
             if verbose >= 2:
                 shift_u.append(db)
+    if verbose >= 2:
+        if len(shift_u) != 0:
+            outusiocsv = f"shiftuiso_u2b_{cycle}"
+            if ucyc >= 0:
+                outusiocsv += f"_{ucyc}"
+            outusiocsv += ".csv"
+            fuiso = open(outusiocsv, "w")
+            for j in range(0, len(shift_u)):
+                fuiso.write("{0}, {1}\n".format(j, shift_u[j]))
+            fuiso.close()
+
+
+def update_uiso_values_bead(
+    grid_du,
+    structure,
+    com_model,
+    biso_range,
+    mode="linear",
+    scale=1.0,
+    cycle=0,
+    verbose=0,
+    ucyc=-1,
+):
+    """_summary_
+
+    Args:
+        grid_du (_type_): _description_
+        structure (_type_): _description_
+        biso_range (_type_): _description_
+        mode (str, optional): _description_. Defaults to "linear".
+        scale (float, optional): _description_. Defaults to 1.0.
+        cycle (int, optional): _description_. Defaults to 0.
+        verbose (int, optional): _description_. Defaults to 0.
+        ucyc (int, optional): _description_. Defaults to -1.
+    """
+    modes = ["linear", "tricubic"]
+    if mode not in modes:
+        raise ValueError(f"Invalid mode. Expected one of {modes}")
+    if verbose >= 2:
+        shift_u = []
+    if mode == "linear":
+        for c in structure[0]:
+            for r in c:
+                res_com = com_model[c.name][str(r.seqid)][r.name]
+                # sel = gemmi.Selection().set_atom_flags("c")
+                com = res_com[0].pos + r.find_atom(res_com[0].name, "*").pos
+                du = scale * grid_du.interpolate_value(com)
+                db = sf_util.u2b(du)
+                for a in r:
+                    a.b_iso = sf_util.limit_biso(
+                        (a.b_iso - db), biso_range[0], biso_range[1]
+                    )
+                    if verbose >= 2:
+                        shift_u.append(db)
+    if mode == "tricubic":
+        for c in structure[0]:
+            for r in c:
+                res_com = com_model[c.name][str(r.seqid)][r.name]
+                # sel = gemmi.Selection().set_atom_flags("c")
+                com = res_com[0].pos + r.find_atom(res_com[0].name, "*").pos
+                du = scale * grid_du.tricubic_interpolation(com)
+                db = sf_util.u2b(du)
+                for a in r:
+                    a.b_iso = sf_util.limit_biso(
+                        (a.b_iso - db), biso_range[0], biso_range[1]
+                    )
+                    if verbose >= 2:
+                        shift_u.append(db)
     if verbose >= 2:
         if len(shift_u) != 0:
             outusiocsv = f"shiftuiso_u2b_{cycle}"

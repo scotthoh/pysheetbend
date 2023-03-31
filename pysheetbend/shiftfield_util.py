@@ -74,6 +74,44 @@ def has_converged(model0, model1, coor_tol, bfac_tol):
     return coor_rmsd < coor_tol and bfac_rmsd < bfac_tol
 
 
+def residues_center_of_mass(structure):
+    """Calculate center of mass for each residue,
+    and store in an array the relative position of the center w.r.t. the Ca
+
+    Args:
+        structure (gemmi.Structure): Gemmi Structure instance
+
+    Return:
+        NumPy array of relative Positions for each residue's center of mass
+        w.r.t. the Ca of the residue
+    """
+    com_model = structure[0].clone()
+    # ConnectedResidues(chain.name, str(residue.seqid), residue.name)
+    for c in structure[0]:
+        for r in c:
+            total_weighted_sum = gemmi.Position(0.0, 0.0, 0.0)
+            total_mass = 0.0
+            for a in r:
+                weight = a.element.weight * a.occ
+                total_weighted_sum += a.pos * weight
+                total_mass += weight
+            com = total_weighted_sum / total_mass
+            com_res = com_model[c.name][str(r.seqid)][r.name]
+            if r.het_flag == "A":
+                atomC = r.find_atom("CA", "*")
+            else:
+                atomC = r.find_atom("C1*", "*")
+            if atomC is None:
+                atomC = r[0]
+            # use flag to flag atom
+            com_atom = com_res.find_atom(atomC.name, "*")
+            com_atom.flag = "c"
+            com_atom.pos = com - atomC.pos
+    sel = gemmi.Selection().set_atom_flags("c")
+    sel.remove_not_selected(com_model)
+    return com_model
+
+
 def mapGridPositions_radius(densMap, atom, gridtree, radius):
     """
     Returns the indices of the nearest pixels within the radius
@@ -295,7 +333,7 @@ def limit_biso(b_iso, blo, bhi):
     """
     return bhi if b_iso > bhi else blo if b_iso < blo else b_iso
 
-    return b_iso
+    # return b_iso
 
 
 class Cell:

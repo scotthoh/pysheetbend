@@ -59,7 +59,8 @@ def main(args):
     keep_ligand = not args.no_ligands
     keep_water = not args.no_water
     selection = args.selection
-    alternative_clustering = False
+    alternative_clustering = True
+    bead_mode = False
     # for profiling, if verbose >= 2, writes out time
     # for each profiled section at the end
     timelog = sf_util.Profile()
@@ -208,9 +209,11 @@ def main(args):
     print("\nRefine model against EM map")
     res_list = (np.linspace(res, resbycyc[0], int(ncycrr)))[::-1]
     # less fragment at low res
-    eps_list = np.linspace(5.2, 5.45, int(ncycrr))[::-1]
-    # eps_list = np.linspace(3.7, 4.0, int(ncycrr))
-
+    # eps_list = np.linspace(5.2, 5.45, int(ncycrr))[::-1]
+    eps_list = np.linspace(3.7, 4.0, int(ncycrr))[::1]
+    timelog.start("CoM")
+    model_com = sf_util.residues_center_of_mass(structure)
+    timelog.end("CoM")
     print(f"Running refinement on resolutions: {res_list}")
     for rcyc in range(0, len(res_list)):  # resolution cycle; macro-cycle
         resolution = res_list[rcyc]
@@ -222,7 +225,8 @@ def main(args):
             )
             if resolution >= 4.5 and alternative_clustering:
                 preg.get_frags_clusters(
-                    atom_selection="centre",  # "one_per_residue"
+                    # atom_selection="centre",  # "one_per_residue"
+                    atom_selection="one_per_residue",
                     dbscan_eps=eps_list[rcyc],
                     attr_name=f"cluster_rescyc{str(rcyc)}",
                     outfile_suffix=splitext(basename(ippdb))[0],
@@ -423,16 +427,30 @@ def main(args):
                 )
                 timelog.end("Numpy2Grid")
                 timelog.start("UpdateModel")
-                map_funcs.update_atoms_position(
-                    grid_dx,
-                    grid_dy,
-                    grid_dz,
-                    structure,
-                    mode="tricubic",
-                    selection=selection,
-                )
+                if resolution >= 8.0 and bead_mode:
+                    map_funcs.update_atoms_position_bead(
+                        grid_dx,
+                        grid_dy,
+                        grid_dz,
+                        structure,
+                        model_com,
+                        mode="tricubic",
+                    )
+                else:
+                    map_funcs.update_atoms_position(
+                        grid_dx,
+                        grid_dy,
+                        grid_dz,
+                        structure,
+                        mode="tricubic",
+                        selection=selection,
+                    )
                 timelog.end("UpdateModel")
-
+            if verbose >= 3:
+                outfname = "{0}_prepseudoreg_rescyc{1}_cyc{2}.pdb".format(
+                    pathfname, rcyc + 1, cyc
+                )
+                structure.write_minimal_pdb(f"{outfname}")
             # run pseudo-regularisation end of every shift-field iteration
             # not recommended as the convergence rate is slower
             # i.e. shifts might get cancelled or reduced from pseudo-regularisation
@@ -485,7 +503,7 @@ def main(args):
             ovl_map, ovl_mdl = map_funcs.calculate_overlap_scores(
                 scl_map, scl_cmap, mapcurreso_t, fltrcmap_t
             )
-            if ovl_map >= 0.5:
+            if ovl_map >= 0.9:
                 diffmap_lpfilter = False
             else:
                 diffmap_lpfilter = True
@@ -562,7 +580,7 @@ def main(args):
         # after every resolution if pseudoreg is set to postref
         if pseudoreg == "postref" or pseudoreg == "yes":
             timelog.start("PseudoReg")
-            preg.regularize_frag(structure, dbscan_cluster=dbscan_cluster)
+            preg.regularize_frag(structure, dbscan_cluster=dbscan_cluster, cycle=rcyc)
             timelog.end("PseudoReg")
             # logger.info(f"End of refine-regularise cycle {cycrr+1}")
             # logger.info("TEMPys scores :")
@@ -575,8 +593,8 @@ def main(args):
         # U-isotropic refinement
         # better to run at the end of each Regularise-Refine cycle (macro-cycle)
         uiso_refined = False
-
-        if refuiso:  # and (rcyc in [0, len(res_list)//2, len(res_list)-1]):
+        # rcyc in [0, len(res_list) - 1]
+        if refuiso and (rcyc in [0, len(res_list) // 2, len(res_list) - 1]):
             uiso_converged = False
             ucyc = 0
             print(" REFINE UISO")
@@ -675,15 +693,27 @@ def main(args):
                 )
                 timelog.end("Numpy2Grid")
                 timelog.start("UpdateModel")
-                map_funcs.update_uiso_values(
-                    grid_du,
-                    structure,
-                    biso_range,
-                    mode="tricubic",
-                    cycle=rcyc + 1,
-                    verbose=verbose,
-                    ucyc=ucyc + 1,
-                )
+                if resolution >= 8 and bead_mode:
+                    map_funcs.update_uiso_values_bead(
+                        grid_du,
+                        structure,
+                        model_com,
+                        biso_range,
+                        mode="tricubic",
+                        cycle=rcyc + 1,
+                        verbose=verbose,
+                        ucyc=ucyc + 1,
+                    )
+                else:
+                    map_funcs.update_uiso_values(
+                        grid_du,
+                        structure,
+                        biso_range,
+                        mode="tricubic",
+                        cycle=rcyc + 1,
+                        verbose=verbose,
+                        ucyc=ucyc + 1,
+                    )
                 timelog.end("UpdateModel")  # end of u-iso refine
                 # only do convergence check/loop at the final macro cycle
                 # before final cycle just run once for the b-factor

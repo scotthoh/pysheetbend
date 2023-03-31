@@ -179,30 +179,31 @@ class Pseudoregularize:
         tr.vec.fromlist(trans_op)
         return tr
 
-    def regularize_frag(self, mol_work, model_number=0, dbscan_cluster=False):
-        if dbscan_cluster:
-            return self.regularize_frag_1(
-                mol_work=mol_work,
-                model_number=model_number,
-                dbscan_cluster=dbscan_cluster,
-            )
-        else:
-            return self.regularize_frag_0(mol_work=mol_work, model_number=model_number)
+    def regularize_frag(self, mol_work, model_number=0, dbscan_cluster=False, cycle=0):
+        # if dbscan_cluster:
+        #    return self.regularize_frag_1(
+        #        mol_work=mol_work,
+        #        model_number=model_number,
+        #        dbscan_cluster=dbscan_cluster,
+        #        cycle=cycle,
+        #    )
+        # else:
+        return self.regularize_frag_0(mol_work=mol_work, model_number=model_number)
 
-    def regularize_frag_0(self, mol_work, model_number=0):
+    def regularize_frag_0(self, mol_work, model_number=0, dbscan_cluster=False):
         """
         Regularize target model against reference model
         Argument:
             mol_work: GEMMI structure, target work model to be regularized
             model_number: model number in structure instance, default: 0, first model
         """
-        # if dbscan_cluster:
-        #    if len(self.frags_cluster) != 0:
-        #        fraglist = self.frags_cluster
-        #    else:
-        #        return False
-        # else:
-        fraglist = self.fragsList
+        if dbscan_cluster:
+            if len(self.frags_cluster) != 0:
+                fraglist = self.frags_cluster
+            else:
+                return False
+        else:
+            fraglist = self.fragsList
         # loop of fragments and regularize
         for frag in fraglist:
             mp1 = []
@@ -318,9 +319,13 @@ class Pseudoregularize:
             # new_molwork = np.append(new_molwork, frag_work)
         return True
 
-    def regularize_frag_1(self, mol_work, model_number=0, dbscan_cluster=False):
+    def regularize_frag_1(
+        self, mol_work, model_number=0, dbscan_cluster=False, cycle=0
+    ):
         # loop of fragments and regularize
         # weight using a spherical distance weight
+        mol_copy = mol_work.clone()
+        count = 0
         if len(self.frags_cluster) != 0:
             fraglist = self.frags_cluster
         else:
@@ -329,6 +334,7 @@ class Pseudoregularize:
             mp1 = []
             mp2 = []
             keys = []
+            com = gemmi.Position(0.0, 0.0, 0.0)
             for CR in frag:
                 # just to make sure the residues in mol_work is also in mol_ref
                 try:
@@ -344,18 +350,25 @@ class Pseudoregularize:
                 if atom is None:
                     atom = mp2[-1][0]
                 keys.append(atom.pos)
+                com += atom.pos
                 # continue from here 1 Feb
+            com = com / len(keys)
             w0 = []
-            mid_r = len(keys) // 2
-            rn = abs(keys[mid_r].dist(keys[-1]))
-            r0 = abs(keys[mid_r].dist(keys[0]))
-            max_radius = max(r0, rn) + 5.0
+            # mid_r = (len(keys) // 2) - 1
+            # rn = abs(keys[mid_r].dist(keys[-1]))
+            # r0 = abs(keys[mid_r].dist(keys[0]))
+            # rn = abs(com.dist(keys[-1]))
+            # r0 = abs(com.dist(keys[0]))
+            # max_radius = max(r0, rn) + 20.0
+            max_radius = 20.0
 
             for r in range(len(mp2)):
                 w0tmp = []
                 for atom in mp2[r]:
-                    dr = atom.pos.dist(keys[mid_r])
-                    w00 = pow(1.0 - dr / max_radius, 2)
+                    # dr = atom.pos.dist(keys[mid_r])
+                    dr = atom.pos.dist(com)
+                    w00 = (np.cos(np.pi * (dr / max_radius)) + 1.0) / 2.0
+                    # w00 = pow(1.0 - dr / max_radius, 2)
                     w0tmp.append(w00)
                 w0.append(w0tmp)
             f0 = mp1.copy()
@@ -379,11 +392,16 @@ class Pseudoregularize:
                 # just to make sure the residues in mol_work is also in mol_ref
                 try:
                     res = mol_work[model_number][CR.C][CR.S][CR.R]
+                    res_copy = mol_copy[model_number][CR.C][CR.S][CR.R]
                 except IndexError:
                     continue
                 for a in range(len(mp1[r])):
                     res[a].pos = mp1[r][a].pos
+                    res_copy[a].b_iso = w0[r][a]
+                    res_copy[a].occ = float(count)
                     # mol_work[model_number][CR.C][CR.S][CR.R][a].pos = mp1[r][a].pos
+            count += 1
+        mol_copy.write_minimal_pdb(f"test_out_biso_weight_{cycle}.pdb")
         return True
 
     def get_frags_clusters(
@@ -411,22 +429,29 @@ class Pseudoregularize:
             Boolean if succeeds or failed
 
         """
+        print("IN GET FRAG CLUSTERS")
         list_ids, list_coords = self.gemmimodelutils.get_coordinates(
             return_list=True, atom_selection=atom_selection
         )
 
-        ids_arr = np.array(list_ids)
+        # ids_arr = np.array(list_ids)
         cluster_labels = cluster_coord_features(
             np.array(list_coords), dbscan_eps=dbscan_eps
         )
-        for i in range(0, len(cluster_labels)):
-            if cluster_labels[i] == -1:  # group labels -1 to adjacent clusters
-                if i > 0:
-                    cluster_labels[i] = cluster_labels[i - 1]
-                else:
-                    cluster_labels[i] = cluster_labels[i + 1]
+        # for i in range(0, len(cluster_labels)):
+        #    if cluster_labels[i] == -1:  # group labels -1 to adjacent clusters
+        #        if i > 0:
+        #            cluster_labels[i] = cluster_labels[i - 1]
+        #        else:
+        #            cluster_labels[i] = cluster_labels[i + 1]
         list_res_ids, list_res_attr = get_residue_attribute(list_ids, cluster_labels)
+        print(list_res_ids[0], list_res_ids[-1])
+        print(list_res_attr)
         dict_attr = {}
+        # to put separated clusters in frags not according to same cluster number but
+        # according to separation, a separate fragment if discontinued
+        # get fragments from cluster labels
+        frag_start_ind = np.where(np.diff(cluster_labels, prepend=np.nan))[0]
         for n in range(len(list_res_attr)):
             dict_attr[list_res_ids[n]] = list_res_attr[n]
         set_bfactor_attributes(
@@ -437,25 +462,36 @@ class Pseudoregularize:
             outfile_suffix=outfile_suffix,
         )
         # get unique labels
-        num_clusters = list(dict.fromkeys(cluster_labels))
-        self.frags_cluster = [None] * len(num_clusters)
+        ##num_clusters = list(dict.fromkeys(cluster_labels))
+        ##self.frags_cluster = [None] * len(num_clusters)
+        self.frags_cluster = [None] * len(frag_start_ind)
         # setting the fragments from cluster labels
         # print(num_clusters)
         # clusters = [None] * len(num_clusters)
-        # print(clusters)
+        # print(cluster_labels)
         # put clusters into frags_cluster list
-        print(len(cluster_labels))
-        for i in range(len(num_clusters)):
-            frags = ids_arr[cluster_labels == num_clusters[i]]
-            # print(f"DEBUG: frag_index = {frags}")
-            # frags = [list_ids[j] for j in frag_index]
-            frag_dataclass = self.list_to_dataclass(frags)
-            self.frags_cluster[i] = frag_dataclass
+        # print(len(cluster_labels))
+        for n in range(len(frag_start_ind)):
+            if n != len((frag_start_ind)) - 1:
+                frags = list_ids[frag_start_ind[n] - 1 : frag_start_ind[n + 1] + 1]
+            else:
+                frags = list_ids[frag_start_ind[n] - 1 :]
+            frags_dataclass = self.list_to_dataclass(frags)
+            self.frags_cluster[n] = frags_dataclass
+
+        # for i in range(len(num_clusters)):
+        #    frags = ids_arr[cluster_labels == num_clusters[i]]
+        #    # print(f"DEBUG: frag_index = {frags}")
+        #    # frags = [list_ids[j] for j in frag_index]
+        #    frag_dataclass = self.list_to_dataclass(frags)
+        #    self.frags_cluster[i] = frag_dataclass
 
         if len(self.frags_cluster) != 0 and frags[0] is not None:
             return True
         else:
             return False
+
+    # def get_frags_from_cluster_labels(self, cluster_labels, list_res_ids):
 
     def list_to_dataclass(self, array_ids: Union[str, np.ndarray] = None):
         if isinstance(array_ids, str):
