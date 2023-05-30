@@ -344,6 +344,14 @@ class SheetbendParser:
             required=False,
         )
 
+        misc.add_argument(
+            "--write_cubic_map",
+            help="Write internally made cubic map if input is not cubic",
+            action="store_true",
+            dest="cubicmap",
+            required=False,
+        )
+
     def parse_args(self, arg_list):
         parser = argparse.ArgumentParser()
         self.add_args(parser)
