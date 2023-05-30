@@ -1221,7 +1221,7 @@ def global_scale_maps(
     return scale_ref, scale_tgt
 
 
-def make_map_cubic(mapin, grid_info):
+def make_map_cubic(mapin, grid_info, write_map=False):
     max_len = -1
     max_ind = -1
     for i in range(0, 3):
@@ -1248,6 +1248,9 @@ def make_map_cubic(mapin, grid_info):
         mapin.grid.unit_cell.gamma,
     )
     newmap.grid.spacegroup = gemmi.SpaceGroup("P1")
+    newmap.update_ccp4_header()
+    if write_map:
+        newmap.write_ccpe_map("input_to_cubicmap.mrc")
     return newmap, new_gridinfo
 
 
