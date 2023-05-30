@@ -1250,7 +1250,7 @@ def make_map_cubic(mapin, grid_info, write_map=False):
     newmap.grid.spacegroup = gemmi.SpaceGroup("P1")
     newmap.update_ccp4_header()
     if write_map:
-        newmap.write_ccpe_map("input_to_cubicmap.mrc")
+        newmap.write_ccp4_map("input_to_cubicmap.mrc")
     return newmap, new_gridinfo
 
 
