@@ -716,7 +716,8 @@ def main(args):
         structure=structure,
         reso=res,
         rate=samp_rate,
-        grid_shape=gridshape.grid_shape,
+        grid_shape=grid_info.grid_shape,
+        #grid_shape=gridshape.grid_shape,
     )
     timelog.start("MapDensity")
     timelog.start("Scale")
