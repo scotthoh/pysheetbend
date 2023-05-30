@@ -1222,16 +1222,32 @@ def global_scale_maps(
 
 
 def make_map_cubic(mapin, grid_info, write_map=False):
+    """make map cubic by adding padding filled with 0.0 to the lesser dimension
+
+    Args:
+        mapin (Gemmi map): Gemmi ccp4 map object
+        grid_info (grid_info): grid info
+        write_map (bool, optional): option to write cubic map. Defaults to False.
+
+    Returns:
+        (gemmi.Ccp4Map, new_grid_info): new map, new grid info
+    """
     max_len = -1
     max_ind = -1
+    
     for i in range(0, 3):
         if grid_info.grid_shape[i] > max_len:
             max_len = grid_info.grid_shape[i]
             max_ind = i
-
+            
+    padding = [max_len - grid_info.grid_shape[i] for i in (0, 1, 2)]
     max_celldim = mapin.grid.unit_cell.parameters[max_ind]
     new_shape = np.array([max_len, max_len, max_len])
-    map_data = resample_data_by_boxsize(mapin.grid, [max_len, max_len, max_len])
+    map_data = np.array(mapin.grid, copy=False, dtype=np.float32)
+    map_data = np.pad(map_data,
+                      ((0, padding[0]), (0, padding[1]), (0, padding[2])),
+                      constant_values=1e-5,
+                      )
     apix = float(max_celldim / max_len)
     new_voxel_size = np.array([apix, apix, apix])
     new_gridinfo = GridInfo(
