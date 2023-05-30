@@ -60,6 +60,7 @@ def main(args):
     keep_water = not args.no_water
     selection = args.selection
     alternative_clustering = False
+    write_cubic_map = args.cubicmap
     # for profiling, if verbose >= 2, writes out time
     # for each profiled section at the end
     timelog = sf_util.Profile()
@@ -111,7 +112,7 @@ def main(args):
         grid_info.grid_shape[0] != grid_info.grid_shape[1]
         or grid_info.grid_shape[1] != grid_info.grid_shape[2]
     ):
-        mapin, grid_info = map_funcs.make_map_cubic(mapin, grid_info)
+        mapin, grid_info = map_funcs.make_map_cubic(mapin, grid_info, write_map=write_cubic_map)
 
     fullMap = mapin.grid
     # TODO: check map box size and reduce if too big?
